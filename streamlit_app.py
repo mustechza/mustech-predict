@@ -1,19 +1,42 @@
-# crash_predictor_app.py
-
 import streamlit as st
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+import os
+import pickle
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
 
-# App title
-st.title("Crash Predictor App (Multiplier Prediction)")
+# File paths
+MODEL_FILE = "model.pkl"
+DATA_FILE = "data.csv"
 
-# User input for crash values
+# Load or initialize model
+if os.path.exists(MODEL_FILE):
+    with open(MODEL_FILE, "rb") as f:
+        model = pickle.load(f)
+else:
+    model = LinearRegression()
+
+# Load or initialize data
+if os.path.exists(DATA_FILE):
+    data_df = pd.read_csv(DATA_FILE)
+else:
+    data_df = pd.DataFrame(columns=[
+        'mean', 'std', 'last', 'max', 'min', 'change', 'target'
+    ])
+
+# App UI
+st.title("Crash Predictor App with Memory")
+
+# Input section
 input_text = st.text_input("Enter recent crash values (comma-separated)")
-user_feedback = st.text_input("Enter correct multiplier (optional, e.g. 2.35)")
+user_feedback = st.text_input("Enter actual multiplier result (optional, e.g. 2.45)")
+predict_button = st.button("Predict")
+train_button = st.button("Train Model")
 
-# Parse input into float list
+# Convert input
 def parse_input(text):
     try:
         return [float(x.strip()) for x in text.split(",") if x.strip()]
@@ -22,65 +45,68 @@ def parse_input(text):
 
 crash_values = parse_input(input_text)
 
-# Feature extraction for regression
+# Feature extraction
 def extract_features(values):
     if len(values) < 5:
         return None
     last_five = values[-5:]
-    features = [
-        np.mean(last_five),
-        np.std(last_five),
-        last_five[-1],
-        max(last_five),
-        min(last_five),
-        (last_five[-1] - last_five[-2]) if len(last_five) > 1 else 0
-    ]
-    return np.array(features).reshape(1, -1)
+    return {
+        'mean': np.mean(last_five),
+        'std': np.std(last_five),
+        'last': last_five[-1],
+        'max': max(last_five),
+        'min': min(last_five),
+        'change': last_five[-1] - last_five[-2] if len(last_five) > 1 else 0
+    }
 
-# Sample training data (can be appended with user feedback)
-X_sample = np.array([
-    [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
-    [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
-    [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
-    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
-])
-y_sample = np.array([2.6, 1.1, 3.9, 1.0])  # Regression targets (multipliers)
-
-model = LinearRegression()
-model.fit(X_sample, y_sample)
-
-if crash_values:
+# Make prediction
+if predict_button and crash_values:
     features = extract_features(crash_values)
-    if features is not None:
-        prediction = model.predict(features)[0]
-        st.subheader(f"Predicted Next Multiplier: **{prediction:.2f}x**")
+    if features:
+        feature_df = pd.DataFrame([features])
+        prediction = model.predict(feature_df)[0]
+        target_with_margin = prediction * 0.97  # Adjusted for 3% house edge
 
-        # Show indicators
-        st.subheader("Indicators")
-        st.text(f"Mean: {np.mean(crash_values[-5:]):.2f}")
-        st.text(f"Std Dev: {np.std(crash_values[-5:]):.2f}")
-        st.text(f"Change: {(crash_values[-1] - crash_values[-2]):.2f}" if len(crash_values) > 1 else "Change: N/A")
+        st.subheader("📊 Prediction")
+        st.success(f"Predicted Multiplier: {prediction:.2f}")
+        st.info(f"Safe Target (adjusted for 3% house edge): {target_with_margin:.2f}")
 
-        # Model training based on user input
-        if st.button("Train Model"):
-            if user_feedback:
-                try:
-                    correct_output = float(user_feedback.strip())
-                    new_features = extract_features(crash_values)
-                    if new_features is not None:
-                        X_sample = np.vstack([X_sample, new_features])
-                        y_sample = np.append(y_sample, correct_output)
-                        model.fit(X_sample, y_sample)
-                        st.success("Model updated with your input!")
-                except ValueError:
-                    st.error("Feedback must be a decimal number (e.g. 2.5)")
-            else:
-                st.warning("Enter feedback before training.")
-
-        # Now draw the chart at the end
-        st.subheader("Chart")
+        # Display chart at the bottom
+        st.subheader("📈 Crash Chart")
         fig, ax = plt.subplots()
         ax.plot(crash_values[-10:], marker='o', label='Recent Values')
         ax.axhline(np.mean(crash_values[-5:]), color='r', linestyle='--', label='Mean')
         ax.legend()
         st.pyplot(fig)
+
+# Train model
+if train_button:
+    if user_feedback and crash_values:
+        try:
+            feedback_val = float(user_feedback)
+            features = extract_features(crash_values)
+            if features:
+                features['target'] = feedback_val
+                data_df = pd.concat([data_df, pd.DataFrame([features])], ignore_index=True)
+
+                # Save data
+                data_df.to_csv(DATA_FILE, index=False)
+
+                # Train model
+                X = data_df.drop(columns=['target'])
+                y = data_df['target']
+                model.fit(X, y)
+
+                # Save model
+                with open(MODEL_FILE, "wb") as f:
+                    pickle.dump(model, f)
+
+                st.success("Model trained and saved successfully!")
+        except ValueError:
+            st.error("Feedback must be a numeric value.")
+    else:
+        st.warning("Provide crash values and actual result to train the model.")
+
+# Reminder
+st.markdown("---")
+st.caption("📌 This app stores training data and the model in local files (`data.csv` and `model.pkl`).")

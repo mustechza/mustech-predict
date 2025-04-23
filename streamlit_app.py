@@ -6,9 +6,10 @@ import os
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-st.title("Crash Predictor App 🚀")
+st.set_page_config(page_title="Crash Predictor", layout="centered")
+st.title("🎯 Crash Predictor App")
 
-# JSON storage path
+# JSON file for persistent storage
 DATA_FILE = "training_data.json"
 
 def load_data():
@@ -56,10 +57,8 @@ def extract_features(values):
         last_five[-1] - last_five[-2] if len(last_five) > 1 else 0,
     ]])
 
-# Load data
+# Load and train
 X_sample, y_sample = load_data()
-
-# Train model
 model = LinearRegression()
 model.fit(X_sample, y_sample)
 
@@ -74,8 +73,16 @@ if crash_values:
     if features is not None:
         prediction = model.predict(features)[0]
         safe_target = round(prediction * 0.97, 2)
+
         st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
-        st.success(f"🎯 Safe target multiplier (3% edge): {safe_target:.2f}")
+        st.success(f"✅ Safe target (3% edge): {safe_target:.2f}")
+
+        # Accuracy vs previous round
+        if len(y_sample) >= 1:
+            last_actual = y_sample[-1]
+            last_pred = model.predict([X_sample[-1]])[0]
+            acc = 100 - abs(last_pred - last_actual) / last_actual * 100
+            st.write(f"🧮 Last Prediction Accuracy: **{acc:.2f}%**")
 
         st.subheader("📊 Indicators")
         st.text(f"Mean: {np.mean(crash_values[-5:]):.2f}")
@@ -94,11 +101,38 @@ if st.button("Train with Feedback"):
             y_sample = np.append(y_sample, feedback)
             save_data(X_sample, y_sample)
             model.fit(X_sample, y_sample)
-            st.success("Model trained with your input and saved!")
+            st.success("✅ Model trained and saved with your input!")
     except:
-        st.error("Feedback must be a number")
+        st.error("⚠️ Feedback must be a number")
 
-# Chart
+# 📤 CSV Upload Section
+st.subheader("📤 Upload CSV to Train")
+uploaded_file = st.file_uploader("Upload a CSV file with a 'Multiplier' column", type=["csv"])
+
+if uploaded_file is not None:
+    try:
+        df_csv = pd.read_csv(uploaded_file)
+        if "Multiplier" not in df_csv.columns:
+            st.error("CSV must contain a 'Multiplier' column.")
+        else:
+            multipliers = df_csv["Multiplier"].astype(float).tolist()
+            multipliers = [min(x, 10.5) if x > 10.99 else x for x in multipliers]
+
+            for i in range(5, len(multipliers)):
+                segment = multipliers[i-5:i]
+                features = extract_features(segment)
+                label = multipliers[i]
+                if features is not None:
+                    X_sample = np.vstack([X_sample, features])
+                    y_sample = np.append(y_sample, label)
+
+            save_data(X_sample, y_sample)
+            model.fit(X_sample, y_sample)
+            st.success("📊 Model trained with uploaded CSV data!")
+    except Exception as e:
+        st.error(f"❌ Failed to process CSV: {e}")
+
+# 📉 Chart Section
 if crash_values:
     st.subheader("📉 Recent Crash Chart")
     fig, ax = plt.subplots()
@@ -107,13 +141,12 @@ if crash_values:
     ax.legend()
     st.pyplot(fig)
 
-# Comparison Table
+# 🧾 Predicted vs Actual
 if len(y_sample) >= 5:
+    st.subheader("📋 Prediction Accuracy Table (Last 30)")
     last_X = X_sample[-30:]
     last_y = y_sample[-30:]
     predicted_y = model.predict(last_X)
-
-    st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
     df_compare = pd.DataFrame({
         "Predicted": predicted_y.round(2),
         "Actual": last_y.round(2),
@@ -121,16 +154,12 @@ if len(y_sample) >= 5:
     })
     st.dataframe(df_compare)
 
-    # Accuracy Trend Chart
-    abs_errors = np.abs(predicted_y - last_y)
-    normalized_accuracy = 1 - (abs_errors / last_y.clip(min=0.1))
-    accuracy_percent = (normalized_accuracy * 100).clip(min=0, max=100)
-
-    st.subheader("📈 Accuracy Trend (Last 30 Predictions)")
-    fig_acc, ax_acc = plt.subplots()
-    ax_acc.plot(accuracy_percent, marker='o', linestyle='-', color='green')
-    ax_acc.set_ylabel("Accuracy (%)")
-    ax_acc.set_xlabel("Prediction Index")
-    ax_acc.set_title("Prediction Accuracy Over Time")
-    ax_acc.set_ylim(0, 100)
-    st.pyplot(fig_acc)
+    # 📈 Live accuracy trend chart
+    st.subheader("📈 Prediction Accuracy Trend")
+    accuracy_percent = 100 - np.abs(predicted_y - last_y) / last_y * 100
+    fig2, ax2 = plt.subplots()
+    ax2.plot(accuracy_percent, marker='o', color='green')
+    ax2.set_title("Accuracy (%) Over Last 30 Predictions")
+    ax2.set_ylabel("Accuracy %")
+    ax2.set_xlabel("Round")
+    st.pyplot(fig2)

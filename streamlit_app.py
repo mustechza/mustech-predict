@@ -1,92 +1,130 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error
 import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
 
-st.set_page_config(page_title="Crash Predictor", layout="centered")
+# GitHub raw CSV URL
+CSV_URL = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
+
 st.title("🚀 Crash Predictor App")
 
-# Helper: Clean + cap values
-def clean_and_cap_values(series):
-    return series.astype(str).str.replace("x", "").astype(float).apply(lambda x: min(x, 10.5))
+# Load training data
+@st.cache_data
+def load_training_data(url):
+    df = pd.read_csv(url)
+    df.columns = [c.lower().strip() for c in df.columns]
+    if 'target' not in df.columns:
+        st.error("CSV must contain a 'target' column.")
+        return None, None
+    X = df.drop(columns=['target'])
+    y = df['target'].apply(lambda x: min(x, 10.5))  # Cap values > 10.99
+    return X, y
 
-# Helper: Feature extraction
+X_train, y_train = load_training_data(CSV_URL)
+
+# Train Random Forest model
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# ==================
+# 📥 Input Section
+# ==================
+st.header("📥 Input & Feedback")
+with st.form("input_form"):
+    recent_input = st.text_input("Enter recent crash multipliers (comma-separated)")
+    feedback_value = st.text_input("Actual next multiplier (optional, for training)")
+    submitted = st.form_submit_button("🔁 Train with Feedback")
+
+# Parse input
+def parse_input(text):
+    try:
+        raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
+        capped = [min(x, 10.5) if x > 10.99 else x for x in raw]
+        return capped
+    except:
+        return []
+
+# Feature extraction
 def extract_features(values):
-    features = []
-    labels = []
-    for i in range(6, len(values)):
-        window = values[i-5:i+1]
-        X = [
-            np.mean(window[:-1]),
-            np.std(window[:-1]),
-            window[-2],
-            max(window[:-1]),
-            min(window[:-1]),
-            window[-2] - window[-3]
-        ]
-        features.append(X)
-        labels.append(window[-1])
-    return np.array(features), np.array(labels)
+    if len(values) < 10:
+        return None
+    last_vals = values[-10:]
+    return np.array([[
+        np.mean(last_vals),
+        np.std(last_vals),
+        last_vals[-1],
+        max(last_vals),
+        min(last_vals),
+        last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0,
+    ]])
 
-# Load CSV from GitHub raw URL
-st.subheader("📂 Load Crash History CSV from URL")
-csv_url = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
+crash_values = parse_input(recent_input)
+features = extract_features(crash_values) if crash_values else None
 
-try:
-    df = pd.read_csv(csv_url)
-    crash_values = clean_and_cap_values(df.iloc[:, 0])
-    
-    # Train model live from CSV
-    X, y = extract_features(crash_values)
-    model = GradientBoostingRegressor()
-    model.fit(X, y)
+# ==================
+# 🔮 Prediction
+# ==================
+if features is not None:
+    prediction = model.predict(features)[0]
+    safe_target = round(prediction * 0.97, 2)
+    st.subheader(f"🎯 Predicted next crash: {prediction:.2f}")
+    st.success(f"🛡️ Safe multiplier target (3% edge): {safe_target:.2f}")
 
-    # Predict next value from most recent 5
-    if len(crash_values) >= 6:
-        recent = crash_values[-6:]
-        features = np.array([[
-            np.mean(recent[:-1]),
-            np.std(recent[:-1]),
-            recent[-2],
-            max(recent[:-1]),
-            min(recent[:-1]),
-            recent[-2] - recent[-3],
-        ]])
-        prediction = model.predict(features)[0]
-        st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
-        st.success(f"🎯 Safe target (3% edge): {round(prediction * 0.97, 2)}")
+# ==================
+# 📊 Indicators
+# ==================
+if crash_values:
+    st.header("📊 Indicators")
+    st.text(f"Mean (last 10): {np.mean(crash_values[-10:]):.2f}")
+    st.text(f"Std Dev: {np.std(crash_values[-10:]):.2f}")
+    st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}" if len(crash_values) > 1 else "N/A")
 
-        st.subheader("📊 Indicators")
-        st.text(f"Mean of last 5: {np.mean(recent[:-1]):.2f}")
-        st.text(f"Std Dev of last 5: {np.std(recent[:-1]):.2f}")
-        st.text(f"Change: {(recent[-2] - recent[-3]):.2f}")
+    # Chart
+    st.subheader("📉 Crash History (Last 10)")
+    fig, ax = plt.subplots()
+    ax.plot(crash_values[-10:], marker='o')
+    ax.axhline(np.mean(crash_values[-10:]), color='r', linestyle='--', label='Mean')
+    ax.legend()
+    st.pyplot(fig)
 
-        # Chart
-        st.subheader("📉 Recent Crash Chart")
-        fig, ax = plt.subplots()
-        ax.plot(crash_values[-30:], marker='o', label='Recent')
-        ax.axhline(np.mean(recent[:-1]), color='r', linestyle='--', label='Mean')
-        ax.legend()
-        st.pyplot(fig)
+# ==================
+# 📥 Feedback Training (Live)
+# ==================
+if submitted and features is not None:
+    try:
+        feedback = float(feedback_value)
+        feedback = min(feedback, 10.5)
+        X_train = pd.concat([X_train, pd.DataFrame(features, columns=X_train.columns)], ignore_index=True)
+        y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
+        model.fit(X_train, y_train)
+        st.success("Model retrained with feedback!")
+    except:
+        st.error("Invalid feedback value. Please enter a number.")
 
-        # Accuracy Trend
-        st.subheader("📊 Accuracy (Last 30 Predictions)")
-        pred_last = model.predict(X[-30:])
-        actual_last = y[-30:]
-        df_accuracy = pd.DataFrame({
-            "Predicted": pred_last,
-            "Actual": actual_last,
-            "Abs Error": np.abs(pred_last - actual_last)
-        })
-        st.dataframe(df_accuracy.style.format({"Predicted": "{:.2f}", "Actual": "{:.2f}", "Abs Error": "{:.2f}"}))
-        st.line_chart(df_accuracy["Abs Error"])
+# ==================
+# 📈 Accuracy Table
+# ==================
+st.header("📈 Recent Accuracy (Last 30 Predictions)")
+if len(X_train) >= 30:
+    sample_X = X_train.tail(30)
+    sample_y = y_train.tail(30)
+    preds = model.predict(sample_X)
+    df_accuracy = pd.DataFrame({
+        "Predicted": preds.round(2),
+        "Actual": sample_y.round(2),
+        "Error": np.abs(preds - sample_y).round(2)
+    })
+    st.dataframe(df_accuracy)
 
-        avg_mae = mean_absolute_error(actual_last, pred_last)
-        st.info(f"📏 Mean Absolute Error: {avg_mae:.3f}")
-    else:
-        st.warning("Need at least 6 crash values to make a prediction.")
-except Exception as e:
-    st.error(f"Error loading or processing file: {e}")
-
+    # Trend chart
+    st.subheader("📊 Accuracy Trend")
+    fig2, ax2 = plt.subplots()
+    ax2.plot(np.abs(preds - sample_y), label='Absolute Error', marker='o')
+    ax2.set_title("Prediction Error Over Last 30")
+    ax2.set_ylabel("Error")
+    ax2.legend()
+    st.pyplot(fig2)
+else:
+    st.warning("Not enough data to show accuracy trends.")

@@ -3,100 +3,117 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+import os
 
-# GitHub raw CSV URL
-CSV_URL = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
+st.title("🚀 Crash Predictor App with CSV Persistence")
 
-st.title("🚀 Crash Predictor App")
+CSV_FILE = "training_data.csv"
 
-# ==================
-# 📊 Load and Train
-# ==================
-@st.cache_data
-def load_training_data(url):
-    df = pd.read_csv(url)
-    df.columns = [c.lower().strip() for c in df.columns]
-    if 'target' not in df.columns:
-        return None, None
-    X = df.drop(columns=['target'])
-    y = df['target'].apply(lambda x: min(x, 10.5))
-    return X, y
+# ============================
+# 📥 Load or Create Training Data
+# ============================
+def load_training_data():
+    if os.path.exists(CSV_FILE):
+        df = pd.read_csv(CSV_FILE)
+        X = df.drop(columns=['target'])
+        y = df['target']
+        return X, y
+    else:
+        return pd.DataFrame(columns=['mean', 'std', 'last', 'max', 'min', 'delta']), pd.Series(dtype='float64')
 
-X_train, y_train = load_training_data(CSV_URL)
+def save_training_data(X, y):
+    df = X.copy()
+    df['target'] = y
+    df.to_csv(CSV_FILE, index=False)
+
+X_train, y_train = load_training_data()
+
+# Train model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
+if not X_train.empty:
+    model.fit(X_train, y_train)
 
-# State management
-if "stage" not in st.session_state:
-    st.session_state.stage = "input_recent"
-if "recent_values" not in st.session_state:
-    st.session_state.recent_values = []
-if "features" not in st.session_state:
-    st.session_state.features = None
+# ============================
+# 📥 Input Section
+# ============================
+st.header("📥 Input & Feedback")
+with st.form("input_form"):
+    user_input = st.text_input("Enter crash multipliers (comma-separated):")
+    feedback_value = st.text_input("Actual next multiplier (optional, for training):")
+    submitted = st.form_submit_button("🔁 Submit")
 
-st.header("🧠 Prediction & Feedback")
-input_label = "Enter recent crash multipliers (comma-separated):" if st.session_state.stage == "input_recent" else "Enter actual next multiplier:"
-user_input = st.text_input(input_label)
-submit = st.button("Submit")
-
-# Utils
 def parse_input(text):
     try:
-        raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
-        capped = [min(x, 10.5) if x > 10.99 else x for x in raw]
-        return capped
+        values = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
+        values = [min(x, 10.5) if x > 10.99 else x for x in values]
+        return values
     except:
         return []
 
 def extract_features(values):
     if len(values) < 10:
         return None
-    last = values[-10:]
-    return np.array([[np.mean(last), np.std(last), last[-1], max(last), min(last), last[-1] - last[-2]]])
+    last_vals = values[-10:]
+    return np.array([[np.mean(last_vals),
+                      np.std(last_vals),
+                      last_vals[-1],
+                      max(last_vals),
+                      min(last_vals),
+                      last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0]])
 
-# Logic
-if submit:
-    if st.session_state.stage == "input_recent":
-        values = parse_input(user_input)
-        if len(values) >= 10:
-            st.session_state.recent_values = values
-            st.session_state.features = extract_features(values)
-            prediction = model.predict(st.session_state.features)[0]
-            safe_target = round(prediction * 0.97, 2)
-            st.success(f"🎯 Predicted next crash: {prediction:.2f}")
-            st.info(f"🛡️ Safe multiplier target: {safe_target:.2f}")
-            st.session_state.stage = "input_feedback"
-        else:
-            st.warning("Please enter at least 10 valid multipliers.")
-    else:
-        try:
-            actual = float(user_input)
-            actual = min(actual, 10.5)
-            X_train.loc[len(X_train)] = st.session_state.features.flatten()
-            y_train.loc[len(y_train)] = actual
-            model.fit(X_train, y_train)
-            st.success("✅ Model retrained with feedback!")
-            st.session_state.stage = "input_recent"
-        except:
-            st.error("Invalid input for actual multiplier. Please enter a number.")
+parsed = parse_input(user_input)
+features = extract_features(parsed) if parsed else None
 
-# Visual indicators
-if st.session_state.recent_values:
-    st.subheader("📉 Crash History (Last 10)")
-    vals = st.session_state.recent_values[-10:]
+# ============================
+# 🔮 Prediction
+# ============================
+if features is not None and not X_train.empty:
+    prediction = model.predict(features)[0]
+    safe_target = round(prediction * 0.97, 2)
+    st.subheader(f"🎯 Predicted crash: {prediction:.2f}")
+    st.success(f"🛡️ Safe target: {safe_target:.2f}")
+
+# ============================
+# 🔁 Feedback Training
+# ============================
+if submitted and features is not None:
+    try:
+        feedback = float(feedback_value)
+        feedback = min(feedback, 10.5)
+        new_X = pd.DataFrame(features, columns=X_train.columns if not X_train.empty else ['mean', 'std', 'last', 'max', 'min', 'delta'])
+        X_train = pd.concat([X_train, new_X], ignore_index=True)
+        y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
+        model.fit(X_train, y_train)
+        save_training_data(X_train, y_train)
+        st.success("Model retrained and data saved.")
+    except:
+        st.error("Please enter a valid feedback number.")
+
+# ============================
+# 📈 Accuracy Trend
+# ============================
+if len(X_train) >= 30:
+    st.header("📈 Recent Accuracy (Last 30)")
+    recent_X = X_train.tail(30)
+    recent_y = y_train.tail(30)
+    preds = model.predict(recent_X)
+    errors = np.abs(preds - recent_y)
+
+    df = pd.DataFrame({
+        'Predicted': preds.round(2),
+        'Actual': recent_y.round(2),
+        'Error': errors.round(2)
+    })
+
+    st.dataframe(df)
+
+    st.subheader("📉 Accuracy Trend")
     fig, ax = plt.subplots()
-    ax.plot(vals, marker='o')
-    ax.axhline(np.mean(vals), color='r', linestyle='--', label='Mean')
+    ax.plot(errors, marker='o', label='Absolute Error')
+    ax.set_title("Prediction Error (Last 30)")
+    ax.set_ylabel("Error")
     ax.legend()
     st.pyplot(fig)
-
-# Accuracy Trend
-if len(X_train) >= 30:
-    st.subheader("📈 Accuracy Trend")
-    preds = model.predict(X_train.tail(30))
-    errors = np.abs(preds - y_train.tail(30))
-    fig2, ax2 = plt.subplots()
-    ax2.plot(errors, label='Absolute Error', marker='o')
-    ax2.set_title("Prediction Error (Last 30)")
-    ax2.legend()
-    st.pyplot(fig2)
+else:
+    st.warning("Not enough data to show accuracy trend.")

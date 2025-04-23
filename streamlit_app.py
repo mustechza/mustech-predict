@@ -2,39 +2,32 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
+from sklearn.ensemble import GradientBoostingRegressor
 
 st.title("Crash Predictor App 🚀")
 
-# Hardcoded training data
+# Hardcoded training data (from previous sessions)
 X_sample = np.array([
     [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
     [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
     [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
     [1.0, 0.1, 1.1, 1.3, 0.8, 0.1],
-    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1],
-    [2.14, 0.71, 1.56, 3.26, 1.00, 0.97],
-    [2.11, 0.74, 1.49, 3.24, 1.00, 1.73],
-    [2.18, 0.74, 1.46, 3.29, 1.00, -0.03],
-    [2.32, 0.94, 2.07, 4.26, 1.00, 0.61],
-    [2.64, 1.18, 3.08, 5.00, 1.00, 1.01],
-    [2.61, 1.20, 3.11, 5.10, 1.00, 0.03],
-    [2.56, 1.12, 2.81, 4.65, 1.00, -0.30],
-    [2.46, 1.13, 3.00, 4.68, 1.00, 0.19],
-    [2.27, 1.05, 2.56, 4.44, 1.00, -0.44],
-    [2.31, 1.06, 2.58, 4.32, 1.00, 0.02],
-    [2.31, 1.09, 2.60, 4.50, 1.00, 0.02],
+    [1.93, 0.74, 1.31, 3.04, 1.18, 0.22],
+    [2.02, 0.87, 1.46, 3.55, 1.11, 0.15],
+    [2.63, 0.97, 3.1, 3.74, 1.29, 1.64],
+    [2.58, 0.76, 2.76, 3.32, 1.63, -0.34],
+    [2.53, 0.75, 2.53, 3.36, 1.55, -0.23],
+    [2.44, 0.72, 2.26, 3.3, 1.53, -0.27]
 ])
-y_sample = np.array([2.5, 1.0, 4.0, 1.1, 1.1, 1.00, 1.00, 1.00, 1.00, 2.80, 2.30, 2.10, 1.40, 1.10, 1.20, 1.30])
+y_sample = np.array([2.5, 1.0, 4.0, 1.1, 1.31, 1.46, 3.1, 2.76, 2.53, 2.26])
 
-# Build model
-model = RandomForestRegressor(n_estimators=100, random_state=42)
+# Model training
+model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3)
 model.fit(X_sample, y_sample)
 
-# Input form
-input_text = st.text_input("Enter recent crash multipliers (comma-separated)")
-user_feedback = st.text_input("Actual next multiplier (optional, for model tuning)")
+# --- Input Section ---
+input_text = st.text_input("Enter recent crash multipliers (comma-separated, e.g., 1.2, 2.1, 1.05x)")
+user_feedback = st.text_input("Actual next multiplier (optional, for training)")
 
 def parse_input(text):
     try:
@@ -57,10 +50,9 @@ def extract_features(values):
         last_five[-1] - last_five[-2] if len(last_five) > 1 else 0
     ]])
 
-# Parse user input
 crash_values = parse_input(input_text)
 
-# Prediction
+# --- Prediction + Feedback ---
 if crash_values:
     features = extract_features(crash_values)
     if features is not None:
@@ -80,13 +72,28 @@ if crash_values:
             except:
                 st.warning("⚠️ Invalid feedback format.")
 
-        # Indicators
+        # 🔼 Train with Feedback button (Moved up)
+        if st.button("Train with Feedback"):
+            try:
+                feedback = float(user_feedback.strip().replace("x", ""))
+                if feedback > 10.99:
+                    feedback = 10.5
+                new_features = extract_features(crash_values)
+                if new_features is not None:
+                    X_sample = np.vstack([X_sample, new_features])
+                    y_sample = np.append(y_sample, feedback)
+                    model.fit(X_sample, y_sample)
+                    st.success("Model updated with your input!")
+            except:
+                st.error("Feedback must be a number")
+
+        # 📊 Indicators
         st.subheader("📊 Indicators")
         st.text(f"Mean: {np.mean(crash_values[-5:]):.2f}")
         st.text(f"Std Dev: {np.std(crash_values[-5:]):.2f}")
         st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}")
 
-        # Chart
+        # 📉 Chart
         st.subheader("📉 Recent Crash Chart")
         fig, ax = plt.subplots()
         ax.plot(crash_values[-10:], marker='o', label='Recent')
@@ -94,30 +101,29 @@ if crash_values:
         ax.legend()
         st.pyplot(fig)
 
-        # Prediction comparison table
-        if len(X_sample) >= 5:
+        # 📋 Prediction vs Actual Table
+        if len(y_sample) >= 5:
             last_X = X_sample[-30:]
             last_y = y_sample[-30:]
             predicted_y = model.predict(last_X)
+
+            st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
             df_compare = pd.DataFrame({
                 "Predicted": predicted_y.round(2),
                 "Actual": last_y.round(2),
-                "Absolute Error": np.abs(predicted_y - last_y).round(2)
+                "Abs Error": np.abs(predicted_y - last_y).round(2)
             })
-            st.subheader("📋 Predicted vs Actual (Last 30)")
             st.dataframe(df_compare)
 
-# Optional tuning via feedback
-if st.button("Train with Feedback") and crash_values and user_feedback:
-    try:
-        feedback = float(user_feedback.strip().replace("x", ""))
-        if feedback > 10.99:
-            feedback = 10.5
-        new_features = extract_features(crash_values)
-        if new_features is not None:
-            X_sample = np.vstack([X_sample, new_features])
-            y_sample = np.append(y_sample, feedback)
-            model.fit(X_sample, y_sample)
-            st.success("Model updated with your input!")
-    except:
-        st.error("Feedback must be a number")
+        # 📈 Live accuracy chart
+        if len(y_sample) > 1:
+            errors = np.abs(model.predict(X_sample) - y_sample)
+            accuracy = 100 * (1 - errors / y_sample)
+            accuracy = np.clip(accuracy, 0, 100)
+            st.subheader("📈 Live Prediction Accuracy Trend")
+            fig2, ax2 = plt.subplots()
+            ax2.plot(accuracy[-30:], marker='o', color='green')
+            ax2.set_ylabel("Accuracy (%)")
+            ax2.set_xlabel("Recent Predictions")
+            ax2.set_title("Model Accuracy Over Time")
+            st.pyplot(fig2)

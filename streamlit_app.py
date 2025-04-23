@@ -3,144 +3,114 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 import os
-import pandas as pd
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
 
-st.title("Crash Predictor App 🚀")
+# File to store data
+DATA_FILE = "crash_data.json"
 
-# JSON storage path
-DATA_FILE = "training_data.json"
-
+# Load existing data
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             data = json.load(f)
-            return np.array(data["features"]), np.array(data["labels"])
-    else:
-        return (
-            np.array([
-                [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
-                [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
-                [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
-                [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
-            ]),
-            np.array([2.5, 1.0, 4.0, 1.1])
-        )
+            return data.get("X", []), data.get("y", [])
+    return [], []
 
-def save_data(features, labels):
-    data = {
-        "features": features.tolist(),
-        "labels": labels.tolist()
-    }
+# Save new data
+def save_data(X, y):
     with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
+        json.dump({"X": X, "y": y}, f)
 
+# Parse input
 def parse_input(text):
     try:
-        raw = [float(x.strip()) for x in text.split(",") if x.strip()]
-        capped = [min(x, 10.5) if x > 10.99 else x for x in raw]
-        return capped
+        return [min(float(x.strip()), 10.5) for x in text.split(",") if x.strip()]
     except:
         return []
 
+# Extract features
 def extract_features(values):
     if len(values) < 5:
         return None
-    last_five = values[-5:]
-    return np.array([
-        [
-            np.mean(last_five),
-            np.std(last_five),
-            last_five[-1],
-            max(last_five),
-            min(last_five),
-            last_five[-1] - last_five[-2] if len(last_five) > 1 else 0,
-        ]
-    ])
+    last = values[-5:]
+    return [
+        round(np.mean(last), 3),
+        round(np.std(last), 3),
+        round(last[-1], 3),
+        round(max(last), 3),
+        round(min(last), 3),
+        round(last[-1] - last[-2], 3) if len(last) > 1 else 0
+    ]
+
+# Initialize model
+model = LinearRegression()
 
 # Load data
-X_sample, y_sample = load_data()
+X_stored, y_stored = load_data()
+X = np.array(X_stored)
+y = np.array(y_stored)
 
-# Train model
-model = LinearRegression()
-model.fit(X_sample, y_sample)
+if len(X) > 0:
+    model.fit(X, y)
 
-# Inputs
+# Streamlit UI
+st.title("Crash Predictor App")
+
 input_text = st.text_input("Enter recent crash multipliers (comma-separated)")
-user_feedback = st.text_input("Actual next multiplier (optional, for training)")
+user_feedback = st.text_input("Actual multiplier for last prediction (optional)")
 
 crash_values = parse_input(input_text)
 
+# Predict
 if crash_values:
     features = extract_features(crash_values)
-    if features is not None:
-        prediction = model.predict(features)[0]
-        safe_target = round(prediction * 0.97, 2)
-        st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
-        st.success(f"🎯 Safe target multiplier (3% edge): {safe_target:.2f}")
+    if features:
+        features_array = np.array(features).reshape(1, -1)
+        prediction_value = model.predict(features_array)[0]
 
-        st.subheader("📊 Indicators")
-        st.text(f"Mean: {np.mean(crash_values[-5:]):.2f}")
-        st.text(f"Std Dev: {np.std(crash_values[-5:]):.2f}")
-        st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}")
+        st.subheader(f"Predicted next crash: {prediction_value:.2f}x")
 
-# Feedback training
-if st.button("Train with Feedback"):
-    try:
-        feedback = float(user_feedback.strip())
-        if feedback > 10.99:
-            feedback = 10.5
-        new_features = extract_features(crash_values)
-        if new_features is not None:
-            X_sample = np.vstack([X_sample, new_features])
-            y_sample = np.append(y_sample, feedback)
-            save_data(X_sample, y_sample)
-            model.fit(X_sample, y_sample)
-            st.success("Model trained with your input and saved!")
-    except:
-        st.error("Feedback must be a number")
+        # Accuracy from last round
+        if len(y) > 0:
+            last_actual = y[-1]
+            last_pred = model.predict([X[-1]])[0]
+            error = abs(last_pred - last_actual)
+            accuracy = 100 - (error / max(last_actual, 1) * 100)
+            accuracy = max(0, min(accuracy, 100))
+            st.markdown(f"**Prediction Accuracy (Last Round):** {accuracy:.2f}%")
 
-# Chart
-if crash_values:
-    st.subheader("📉 Recent Crash Chart")
-    fig, ax = plt.subplots()
-    ax.plot(crash_values[-10:], marker='o', label='Recent')
-    ax.axhline(np.mean(crash_values[-5:]), color='r', linestyle='--', label='Mean')
-    ax.legend()
-    st.pyplot(fig)
+        # Train model with user feedback
+        if st.button("Train Model"):
+            if user_feedback:
+                try:
+                    actual_value = min(float(user_feedback), 10.5)
+                    X = np.vstack([X, features_array])
+                    y = np.append(y, actual_value)
+                    save_data(X.tolist(), y.tolist())
+                    model.fit(X, y)
+                    st.success("Model trained with new data.")
+                except ValueError:
+                    st.error("Invalid multiplier. Please enter a number.")
+            else:
+                st.warning("Please enter actual multiplier before training.")
 
-# Comparison Table
-if len(y_sample) >= 5:
-    last_X = X_sample[-30:]
-    last_y = y_sample[-30:]
-    predicted_y = model.predict(last_X)
+        # Show indicators
+        st.subheader("Indicators")
+        st.text(f"Mean (Last 5): {np.mean(crash_values[-5:]):.2f}")
+        st.text(f"Std Dev (Last 5): {np.std(crash_values[-5:]):.2f}")
+        st.text(f"Change (Last 2): {crash_values[-1] - crash_values[-2]:.2f}")
 
-    st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
-    df_compare = pd.DataFrame({
-        "Predicted": predicted_y.round(2),
-        "Actual": last_y.round(2),
-        "Absolute Error": np.abs(predicted_y - last_y).round(2)
-    })
-    st.dataframe(df_compare)
-import io
+        # Comparative chart
+        if len(y) > 1:
+            st.subheader("Prediction vs Actual (Last 30)")
+            compare_count = min(30, len(y))
+            actuals = y[-compare_count:]
+            preds = model.predict(X[-compare_count:])
 
-if len(y_sample) >= 5:
-    df_compare = pd.DataFrame({
-        "Predicted": predicted_y.round(2),
-        "Actual": last_y.round(2),
-        "Absolute Error": np.abs(predicted_y - last_y).round(2)
-    })
-
-    st.subheader("📥 Export Prediction Data")
-
-    # Convert to CSV
-    csv_buffer = io.StringIO()
-    df_compare.to_csv(csv_buffer, index=False)
-    csv_data = csv_buffer.getvalue().encode("utf-8")
-
-    st.download_button(
-        label="📄 Download as CSV",
-        data=csv_data,
-        file_name="prediction_vs_actual.csv",
-        mime="text/csv"
-    )
+            fig, ax = plt.subplots()
+            ax.plot(range(compare_count), actuals, label="Actual", marker='o')
+            ax.plot(range(compare_count), preds, label="Predicted", marker='x')
+            ax.set_title("Prediction Accuracy")
+            ax.legend()
+            st.pyplot(fig)

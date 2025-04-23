@@ -47,16 +47,14 @@ def extract_features(values):
     if len(values) < 5:
         return None
     last_five = values[-5:]
-    return np.array([
-        [
-            np.mean(last_five),
-            np.std(last_five),
-            last_five[-1],
-            max(last_five),
-            min(last_five),
-            last_five[-1] - last_five[-2] if len(last_five) > 1 else 0,
-        ]
-    ])
+    return np.array([[
+        np.mean(last_five),
+        np.std(last_five),
+        last_five[-1],
+        max(last_five),
+        min(last_five),
+        last_five[-1] - last_five[-2] if len(last_five) > 1 else 0,
+    ]])
 
 # Load data
 X_sample, y_sample = load_data()
@@ -122,3 +120,17 @@ if len(y_sample) >= 5:
         "Absolute Error": np.abs(predicted_y - last_y).round(2)
     })
     st.dataframe(df_compare)
+
+    # Accuracy Trend Chart
+    abs_errors = np.abs(predicted_y - last_y)
+    normalized_accuracy = 1 - (abs_errors / last_y.clip(min=0.1))
+    accuracy_percent = (normalized_accuracy * 100).clip(min=0, max=100)
+
+    st.subheader("📈 Accuracy Trend (Last 30 Predictions)")
+    fig_acc, ax_acc = plt.subplots()
+    ax_acc.plot(accuracy_percent, marker='o', linestyle='-', color='green')
+    ax_acc.set_ylabel("Accuracy (%)")
+    ax_acc.set_xlabel("Prediction Index")
+    ax_acc.set_title("Prediction Accuracy Over Time")
+    ax_acc.set_ylim(0, 100)
+    st.pyplot(fig_acc)

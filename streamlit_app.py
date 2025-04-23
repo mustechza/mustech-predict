@@ -1,5 +1,3 @@
-# streamlit_app.py
-
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,19 +6,33 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 st.title("Crash Predictor App 🚀")
 
-# Sample hardcoded training data (features and labels)
+# Hardcoded training data
 X_sample = np.array([
-    [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
-    [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
-    [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
-    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
+    [2.25, 1.12, 1.63, 4.53, 1.02, -1.81],
+    [2.36, 1.16, 1.02, 4.53, 1.01, -0.61],
+    [1.84, 1.08, 1.63, 3.26, 1.01, 0.61],
+    [2.84, 1.10, 2.26, 4.53, 1.01, 0.63],
+    [2.38, 1.17, 2.26, 4.53, 1.01, 0.00],
+    [2.70, 1.23, 2.89, 4.53, 1.01, 0.63],
+    [2.32, 1.04, 1.01, 4.53, 1.01, -1.88],
+    [2.61, 1.22, 3.26, 4.53, 1.01, 2.25],
+    [2.89, 1.18, 3.01, 4.53, 1.01, -0.25],
+    [2.90, 1.09, 2.26, 4.53, 1.01, -0.75],
 ])
-y_sample = np.array([2.5, 1.0, 4.0, 1.1])
+y_sample = np.array([
+    1.63, 1.02, 1.63, 2.26, 2.26, 2.89, 1.01, 3.26, 3.01, 2.26
+])
 
-# Initialize model
+# Train model
 model = GradientBoostingRegressor()
 model.fit(X_sample, y_sample)
 
+# Input section
+st.subheader("📥 Input")
+input_text = st.text_input("Enter recent crash multipliers (comma-separated):")
+user_feedback = st.text_input("Actual next multiplier (optional, for training)")
+
+# Parse input
 def parse_input(text):
     try:
         raw = [float(x.strip().replace('x', '')) for x in text.split(",") if x.strip()]
@@ -29,50 +41,46 @@ def parse_input(text):
     except:
         return []
 
+crash_values = parse_input(input_text)
+
+# Extract features
 def extract_features(values):
     if len(values) < 10:
         return None
-    last_ten = values[-10:]
+    last_vals = values[-10:]
     return np.array([[
-        np.mean(last_ten),
-        np.std(last_ten),
-        last_ten[-1],
-        max(last_ten),
-        min(last_ten),
-        last_ten[-1] - last_ten[-2]
+        np.mean(last_vals),
+        np.std(last_vals),
+        last_vals[-1],
+        max(last_vals),
+        min(last_vals),
+        last_vals[-1] - last_vals[-2]
     ]])
 
-# Combined input & training section
-st.subheader("🔢 Input & Feedback")
-input_text = st.text_input("Enter recent crash multipliers (comma-separated):")
-user_feedback = st.text_input("Actual next multiplier (optional, for training):")
+# Prediction
+if crash_values:
+    features = extract_features(crash_values)
+    if features is not None:
+        prediction = model.predict(features)[0]
+        safe_target = round(prediction * 0.97, 2)
+        st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
+        st.success(f"🎯 Safe target multiplier (3% edge): {safe_target:.2f}")
 
-crash_values = parse_input(input_text)
-
+# Feedback training
 if st.button("Train with Feedback"):
-    if crash_values and len(crash_values) >= 10:
-        features = extract_features(crash_values)
-        if features is not None:
-            prediction = model.predict(features)[0]
-            st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
-            st.success(f"🎯 Safe target (3% edge): {round(prediction * 0.97, 2)}")
-
-            # Train if user gave feedback
-            if user_feedback:
-                try:
-                    actual = float(user_feedback.strip().replace('x', ''))
-                    if actual > 10.99:
-                        actual = 10.5
-                    X_sample = np.vstack([X_sample, features])
-                    y_sample = np.append(y_sample, actual)
-                    model.fit(X_sample, y_sample)
-                    st.success("✅ Model trained with your input!")
-                except:
-                    st.error("Feedback must be a numeric multiplier")
-        else:
-            st.warning("Need at least 10 crash multipliers to predict.")
-    else:
-        st.warning("Enter at least 10 crash multipliers.")
+    try:
+        feedback = float(user_feedback.strip())
+        if feedback > 10.99:
+            feedback = 10.5
+        new_features = extract_features(crash_values)
+        if new_features is not None:
+            global X_sample, y_sample
+            X_sample = np.vstack([X_sample, new_features])
+            y_sample = np.append(y_sample, feedback)
+            model.fit(X_sample, y_sample)
+            st.success("Model updated with your feedback!")
+    except:
+        st.error("Feedback must be a valid number")
 
 # Indicators
 if crash_values:
@@ -90,16 +98,13 @@ if crash_values:
     ax.legend()
     st.pyplot(fig)
 
-# Accuracy table
-if len(y_sample) >= 5:
-    last_X = X_sample[-30:]
-    last_y = y_sample[-30:]
-    predicted_y = model.predict(last_X)
-
-    st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
+# Accuracy trend
+if len(y_sample) >= 10:
+    preds = model.predict(X_sample[-30:])
     df_compare = pd.DataFrame({
-        "Predicted": predicted_y.round(2),
-        "Actual": last_y.round(2),
-        "Absolute Error": np.abs(predicted_y - last_y).round(2)
+        "Predicted": preds.round(2),
+        "Actual": y_sample[-30:].round(2),
+        "Absolute Error": np.abs(preds - y_sample[-30:]).round(2)
     })
+    st.subheader("🧾 Prediction Accuracy (Last 30)")
     st.dataframe(df_compare)

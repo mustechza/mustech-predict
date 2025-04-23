@@ -3,10 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
+from datetime import datetime
+import os
+
+# Optional: for Google Sheets
+# from gspread_pandas import Spread, Client
+# from google.auth import default
 
 st.title("Crash Predictor App 🚀")
 
-# Helper to extract features
 def extract_features(values):
     if len(values) < 10:
         return None
@@ -22,7 +27,6 @@ def extract_features(values):
         sum(np.diff(last_ten) < 0)
     ]])
 
-# Robust CSV parser with capping
 @st.cache_data
 def preprocess_csv(uploaded_file):
     df = pd.read_csv(uploaded_file)
@@ -31,7 +35,6 @@ def preprocess_csv(uploaded_file):
     capped_values = cleaned_values.apply(lambda x: min(x, 10.5) if x > 10.99 else x)
     return capped_values.tolist()
 
-# File uploader
 uploaded_file = st.file_uploader("📂 Upload crash data CSV", type=["csv"])
 crash_values = []
 
@@ -39,11 +42,9 @@ if uploaded_file:
     crash_values = preprocess_csv(uploaded_file)
     st.success("Data loaded successfully!")
 
-# Show preview of uploaded data
 if crash_values:
     st.write("🔢 Preview of parsed values:", crash_values[-10:])
 
-# Training logic
 model = GradientBoostingRegressor()
 X_data = []
 y_data = []
@@ -70,7 +71,6 @@ if X_data and y_data:
         st.text(f"Std Dev: {np.std(crash_values[-10:]):.2f}")
         st.text(f"Change: {(crash_values[-1] - crash_values[-2]):.2f}")
 
-        # Chart
         st.subheader("📉 Recent Multiplier Chart")
         fig, ax = plt.subplots()
         ax.plot(crash_values[-30:], marker='o', label='Crash History')
@@ -78,7 +78,7 @@ if X_data and y_data:
         ax.legend()
         st.pyplot(fig)
 
-        # Comparison
+        # Comparison Table
         if len(y_data) >= 5:
             predicted_vals = model.predict(np.array(X_data[-30:]))
             comparison_df = pd.DataFrame({
@@ -88,3 +88,18 @@ if X_data and y_data:
             })
             st.subheader("🧾 Predicted vs Actual (Last 30)")
             st.dataframe(comparison_df)
+
+            # CSV Export
+            if st.button("📥 Export Predictions to CSV"):
+                filename = f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                comparison_df.to_csv(filename, index=False)
+                st.success(f"Predictions exported as `{filename}`")
+
+            # Optional Google Sheets Export
+            # if st.button("📤 Export to Google Sheets"):
+            #     credentials, _ = default()
+            #     client = Client(auth=credentials)
+            #     spread = Spread("Your Google Sheet Name", client=client)
+            #     spread.df_to_sheet(comparison_df, sheet="Sheet1", index=False, replace=True)
+            #     st.success("Exported to Google Sheets!")
+

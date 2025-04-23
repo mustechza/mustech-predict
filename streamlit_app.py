@@ -1,93 +1,92 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import os
-import joblib
+import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+import matplotlib.pyplot as plt
 
-MODEL_PATH = "trained_crash_predictor_model.pkl"
-
-st.set_page_config(page_title="Crash Predictor App", layout="centered")
+st.set_page_config(page_title="Crash Predictor", layout="centered")
 st.title("🚀 Crash Predictor App")
 
-# --- Data Preprocessing & Training ---
-@st.cache_data
-def preprocess_csv(file):
-    df = pd.read_csv(file)
-    values = df[df.columns[0]].astype(str).str.replace("x", "", regex=False).astype(float)
-    capped = np.where(values > 10.99, 10.5, values)
-    return capped
+# Helper: Clean + cap values
+def clean_and_cap_values(series):
+    return series.astype(str).str.replace("x", "").astype(float).apply(lambda x: min(x, 10.5))
 
-def extract_features(values, window=7):
+# Helper: Feature extraction
+def extract_features(values):
     features = []
     labels = []
-    for i in range(window, len(values)):
-        window_vals = values[i - window:i]
-        feat = [
-            np.mean(window_vals),
-            np.std(window_vals),
-            window_vals[-1],
-            max(window_vals),
-            min(window_vals),
-            window_vals[-1] - window_vals[-2],
+    for i in range(6, len(values)):
+        window = values[i-5:i+1]
+        X = [
+            np.mean(window[:-1]),
+            np.std(window[:-1]),
+            window[-2],
+            max(window[:-1]),
+            min(window[:-1]),
+            window[-2] - window[-3]
         ]
-        features.append(feat)
-        labels.append(values[i])
+        features.append(X)
+        labels.append(window[-1])
     return np.array(features), np.array(labels)
 
-def train_and_save_model(X, y):
+# Load CSV from GitHub raw URL
+st.subheader("📂 Load Crash History CSV from URL")
+csv_url = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
+
+try:
+    df = pd.read_csv(csv_url)
+    crash_values = clean_and_cap_values(df.iloc[:, 0])
+    
+    # Train model live from CSV
+    X, y = extract_features(crash_values)
     model = GradientBoostingRegressor()
     model.fit(X, y)
-    joblib.dump(model, MODEL_PATH)
-    return model
 
-def load_model():
-    if os.path.exists(MODEL_PATH):
-        return joblib.load(MODEL_PATH)
+    # Predict next value from most recent 5
+    if len(crash_values) >= 6:
+        recent = crash_values[-6:]
+        features = np.array([[
+            np.mean(recent[:-1]),
+            np.std(recent[:-1]),
+            recent[-2],
+            max(recent[:-1]),
+            min(recent[:-1]),
+            recent[-2] - recent[-3],
+        ]])
+        prediction = model.predict(features)[0]
+        st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
+        st.success(f"🎯 Safe target (3% edge): {round(prediction * 0.97, 2)}")
+
+        st.subheader("📊 Indicators")
+        st.text(f"Mean of last 5: {np.mean(recent[:-1]):.2f}")
+        st.text(f"Std Dev of last 5: {np.std(recent[:-1]):.2f}")
+        st.text(f"Change: {(recent[-2] - recent[-3]):.2f}")
+
+        # Chart
+        st.subheader("📉 Recent Crash Chart")
+        fig, ax = plt.subplots()
+        ax.plot(crash_values[-30:], marker='o', label='Recent')
+        ax.axhline(np.mean(recent[:-1]), color='r', linestyle='--', label='Mean')
+        ax.legend()
+        st.pyplot(fig)
+
+        # Accuracy Trend
+        st.subheader("📊 Accuracy (Last 30 Predictions)")
+        pred_last = model.predict(X[-30:])
+        actual_last = y[-30:]
+        df_accuracy = pd.DataFrame({
+            "Predicted": pred_last,
+            "Actual": actual_last,
+            "Abs Error": np.abs(pred_last - actual_last)
+        })
+        st.dataframe(df_accuracy.style.format({"Predicted": "{:.2f}", "Actual": "{:.2f}", "Abs Error": "{:.2f}"}))
+        st.line_chart(df_accuracy["Abs Error"])
+
+        avg_mae = mean_absolute_error(actual_last, pred_last)
+        st.info(f"📏 Mean Absolute Error: {avg_mae:.3f}")
     else:
-        return None
+        st.warning("Need at least 6 crash values to make a prediction.")
+except Exception as e:
+    st.error(f"Error loading or processing file: {e}")
 
-# --- Upload & Train Section ---
-with st.expander("📤 Upload CSV & Train Model"):
-    uploaded_file = st.file_uploader("Upload crash data CSV", type=["csv"])
-    if uploaded_file:
-        crash_data = preprocess_csv(uploaded_file)
-        X, y = extract_features(crash_data)
-        model = train_and_save_model(X, y)
-        st.success("✅ Model trained and saved locally!")
-
-# --- Load Existing Model ---
-model = load_model()
-
-# --- Prediction Section ---
-if model:
-    with st.expander("🔢 Predict Next Crash"):
-        input_text = st.text_input("Enter recent crash multipliers (comma-separated)", key="predict_input")
-        if input_text:
-            try:
-                values = np.array([min(float(x.strip().replace("x", "")), 10.5) for x in input_text.split(",")])
-                if len(values) >= 7:
-                    features = extract_features(values)[0][-1].reshape(1, -1)
-                    prediction = model.predict(features)[0]
-                    safe_target = round(prediction * 0.97, 2)
-
-                    st.subheader(f"📈 Predicted: {prediction:.2f}")
-                    st.success(f"🎯 Safe Target (3% edge): {safe_target:.2f}")
-
-                    st.text(f"Mean: {np.mean(values[-5:]):.2f}")
-                    st.text(f"Std Dev: {np.std(values[-5:]):.2f}")
-                    st.text(f"Last Change: {(values[-1] - values[-2]):.2f}")
-
-                    fig, ax = plt.subplots()
-                    ax.plot(values[-10:], marker='o')
-                    ax.axhline(np.mean(values[-5:]), linestyle='--', color='r', label='Mean')
-                    ax.legend()
-                    st.pyplot(fig)
-                else:
-                    st.warning("Please enter at least 7 crash multipliers.")
-            except:
-                st.error("Invalid input. Make sure values are comma-separated numbers like 1.2, 1.3x, etc.")
-else:
-    st.warning("⚠️ No trained model found. Please upload and train using a CSV file.")

@@ -3,41 +3,43 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
 
 # GitHub raw CSV URL
 CSV_URL = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
 
 st.title("🚀 Crash Predictor App")
 
-# Load training data
+# ==================
+# 📊 Load and Train
+# ==================
 @st.cache_data
 def load_training_data(url):
     df = pd.read_csv(url)
     df.columns = [c.lower().strip() for c in df.columns]
     if 'target' not in df.columns:
-        st.error("CSV must contain a 'target' column.")
         return None, None
     X = df.drop(columns=['target'])
-    y = df['target'].apply(lambda x: min(x, 10.5))  # Cap values > 10.99
+    y = df['target'].apply(lambda x: min(x, 10.5))
     return X, y
 
 X_train, y_train = load_training_data(CSV_URL)
-
-# Train Random Forest model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
-# ==================
-# 📥 Input Section
-# ==================
-st.header("📥 Input & Feedback")
-with st.form("input_form"):
-    recent_input = st.text_input("Enter recent crash multipliers (comma-separated)")
-    feedback_value = st.text_input("Actual next multiplier (optional, for training)")
-    submitted = st.form_submit_button("🔁 Train with Feedback")
+# State management
+if "stage" not in st.session_state:
+    st.session_state.stage = "input_recent"
+if "recent_values" not in st.session_state:
+    st.session_state.recent_values = []
+if "features" not in st.session_state:
+    st.session_state.features = None
 
-# Parse input
+st.header("🧠 Prediction & Feedback")
+input_label = "Enter recent crash multipliers (comma-separated):" if st.session_state.stage == "input_recent" else "Enter actual next multiplier:"
+user_input = st.text_input(input_label)
+submit = st.button("Submit")
+
+# Utils
 def parse_input(text):
     try:
         raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
@@ -46,85 +48,55 @@ def parse_input(text):
     except:
         return []
 
-# Feature extraction
 def extract_features(values):
     if len(values) < 10:
         return None
-    last_vals = values[-10:]
-    return np.array([[
-        np.mean(last_vals),
-        np.std(last_vals),
-        last_vals[-1],
-        max(last_vals),
-        min(last_vals),
-        last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0,
-    ]])
+    last = values[-10:]
+    return np.array([[np.mean(last), np.std(last), last[-1], max(last), min(last), last[-1] - last[-2]]])
 
-crash_values = parse_input(recent_input)
-features = extract_features(crash_values) if crash_values else None
+# Logic
+if submit:
+    if st.session_state.stage == "input_recent":
+        values = parse_input(user_input)
+        if len(values) >= 10:
+            st.session_state.recent_values = values
+            st.session_state.features = extract_features(values)
+            prediction = model.predict(st.session_state.features)[0]
+            safe_target = round(prediction * 0.97, 2)
+            st.success(f"🎯 Predicted next crash: {prediction:.2f}")
+            st.info(f"🛡️ Safe multiplier target: {safe_target:.2f}")
+            st.session_state.stage = "input_feedback"
+        else:
+            st.warning("Please enter at least 10 valid multipliers.")
+    else:
+        try:
+            actual = float(user_input)
+            actual = min(actual, 10.5)
+            X_train.loc[len(X_train)] = st.session_state.features.flatten()
+            y_train.loc[len(y_train)] = actual
+            model.fit(X_train, y_train)
+            st.success("✅ Model retrained with feedback!")
+            st.session_state.stage = "input_recent"
+        except:
+            st.error("Invalid input for actual multiplier. Please enter a number.")
 
-# ==================
-# 🔮 Prediction
-# ==================
-if features is not None:
-    prediction = model.predict(features)[0]
-    safe_target = round(prediction * 0.97, 2)
-    st.subheader(f"🎯 Predicted next crash: {prediction:.2f}")
-    st.success(f"🛡️ Safe multiplier target (3% edge): {safe_target:.2f}")
-
-# ==================
-# 📊 Indicators
-# ==================
-if crash_values:
-    st.header("📊 Indicators")
-    st.text(f"Mean (last 10): {np.mean(crash_values[-10:]):.2f}")
-    st.text(f"Std Dev: {np.std(crash_values[-10:]):.2f}")
-    st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}" if len(crash_values) > 1 else "N/A")
-
-    # Chart
+# Visual indicators
+if st.session_state.recent_values:
     st.subheader("📉 Crash History (Last 10)")
+    vals = st.session_state.recent_values[-10:]
     fig, ax = plt.subplots()
-    ax.plot(crash_values[-10:], marker='o')
-    ax.axhline(np.mean(crash_values[-10:]), color='r', linestyle='--', label='Mean')
+    ax.plot(vals, marker='o')
+    ax.axhline(np.mean(vals), color='r', linestyle='--', label='Mean')
     ax.legend()
     st.pyplot(fig)
 
-# ==================
-# 📥 Feedback Training (Live)
-# ==================
-if submitted and features is not None:
-    try:
-        feedback = float(feedback_value)
-        feedback = min(feedback, 10.5)
-        X_train = pd.concat([X_train, pd.DataFrame(features, columns=X_train.columns)], ignore_index=True)
-        y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
-        model.fit(X_train, y_train)
-        st.success("Model retrained with feedback!")
-    except:
-        st.error("Invalid feedback value. Please enter a number.")
-
-# ==================
-# 📈 Accuracy Table
-# ==================
-st.header("📈 Recent Accuracy (Last 30 Predictions)")
+# Accuracy Trend
 if len(X_train) >= 30:
-    sample_X = X_train.tail(30)
-    sample_y = y_train.tail(30)
-    preds = model.predict(sample_X)
-    df_accuracy = pd.DataFrame({
-        "Predicted": preds.round(2),
-        "Actual": sample_y.round(2),
-        "Error": np.abs(preds - sample_y).round(2)
-    })
-    st.dataframe(df_accuracy)
-
-    # Trend chart
-    st.subheader("📊 Accuracy Trend")
+    st.subheader("📈 Accuracy Trend")
+    preds = model.predict(X_train.tail(30))
+    errors = np.abs(preds - y_train.tail(30))
     fig2, ax2 = plt.subplots()
-    ax2.plot(np.abs(preds - sample_y), label='Absolute Error', marker='o')
-    ax2.set_title("Prediction Error Over Last 30")
-    ax2.set_ylabel("Error")
+    ax2.plot(errors, label='Absolute Error', marker='o')
+    ax2.set_title("Prediction Error (Last 30)")
     ax2.legend()
     st.pyplot(fig2)
-else:
-    st.warning("Not enough data to show accuracy trends.")

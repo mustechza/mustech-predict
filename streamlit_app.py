@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 import os
+import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 st.title("Crash Predictor App 🚀")
@@ -10,14 +11,12 @@ st.title("Crash Predictor App 🚀")
 # JSON storage path
 DATA_FILE = "training_data.json"
 
-# Load stored training data
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             data = json.load(f)
             return np.array(data["features"]), np.array(data["labels"])
     else:
-        # Fallback if no data yet
         return (
             np.array([
                 [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
@@ -28,7 +27,6 @@ def load_data():
             np.array([2.5, 1.0, 4.0, 1.1])
         )
 
-# Save training data to file
 def save_data(features, labels):
     data = {
         "features": features.tolist(),
@@ -37,7 +35,6 @@ def save_data(features, labels):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
 
-# Cap values over 10.99 to 10.5
 def parse_input(text):
     try:
         raw = [float(x.strip()) for x in text.split(",") if x.strip()]
@@ -111,3 +108,39 @@ if crash_values:
     ax.axhline(np.mean(crash_values[-5:]), color='r', linestyle='--', label='Mean')
     ax.legend()
     st.pyplot(fig)
+
+# Comparison Table
+if len(y_sample) >= 5:
+    last_X = X_sample[-30:]
+    last_y = y_sample[-30:]
+    predicted_y = model.predict(last_X)
+
+    st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
+    df_compare = pd.DataFrame({
+        "Predicted": predicted_y.round(2),
+        "Actual": last_y.round(2),
+        "Absolute Error": np.abs(predicted_y - last_y).round(2)
+    })
+    st.dataframe(df_compare)
+import io
+
+if len(y_sample) >= 5:
+    df_compare = pd.DataFrame({
+        "Predicted": predicted_y.round(2),
+        "Actual": last_y.round(2),
+        "Absolute Error": np.abs(predicted_y - last_y).round(2)
+    })
+
+    st.subheader("📥 Export Prediction Data")
+
+    # Convert to CSV
+    csv_buffer = io.StringIO()
+    df_compare.to_csv(csv_buffer, index=False)
+    csv_data = csv_buffer.getvalue().encode("utf-8")
+
+    st.download_button(
+        label="📄 Download as CSV",
+        data=csv_data,
+        file_name="prediction_vs_actual.csv",
+        mime="text/csv"
+    )

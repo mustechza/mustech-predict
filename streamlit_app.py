@@ -3,103 +3,134 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
-from datetime import datetime
-import os
-
-# Optional: for Google Sheets
-# from gspread_pandas import Spread, Client
-# from google.auth import default
 
 st.title("Crash Predictor App 🚀")
 
+# --- Preprocessing uploaded CSV ---
+@st.cache_data
+def preprocess_csv(uploaded_file):
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.write("✅ CSV Columns:", df.columns.tolist())  # Debug
+
+        for col in df.columns:
+            cleaned = df[col].astype(str).str.replace("x", "", regex=False)
+            numeric = pd.to_numeric(cleaned, errors="coerce").dropna()
+            if not numeric.empty:
+                st.write(f"📊 Using column: `{col}` with {len(numeric)} values.")
+                capped = numeric.apply(lambda x: min(x, 10.5) if x > 10.99 else x)
+                return capped.tolist()
+
+        st.error("❌ No valid numeric column found in uploaded CSV.")
+        return []
+
+    except Exception as e:
+        st.error(f"❌ Error reading CSV: {e}")
+        return []
+
+# --- Feature Extraction ---
 def extract_features(values):
     if len(values) < 10:
         return None
     last_ten = values[-10:]
-    return np.array([[
-        np.mean(last_ten),
-        np.std(last_ten),
-        last_ten[-1],
-        max(last_ten),
-        min(last_ten),
-        last_ten[-1] - last_ten[-2] if len(last_ten) > 1 else 0,
-        sum(np.diff(last_ten) > 0),
-        sum(np.diff(last_ten) < 0)
-    ]])
+    return np.array([
+        [
+            np.mean(last_ten),
+            np.std(last_ten),
+            last_ten[-1],
+            max(last_ten),
+            min(last_ten),
+            last_ten[-1] - last_ten[-2] if len(last_ten) > 1 else 0,
+        ]
+    ])
 
-@st.cache_data
-def preprocess_csv(uploaded_file):
-    df = pd.read_csv(uploaded_file)
-    raw_values = df[df.columns[0]].astype(str).str.replace("x", "", regex=False)
-    cleaned_values = pd.to_numeric(raw_values, errors="coerce").dropna()
-    capped_values = cleaned_values.apply(lambda x: min(x, 10.5) if x > 10.99 else x)
-    return capped_values.tolist()
+# --- Hardcoded Training Data ---
+X_sample = np.array([
+    [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
+    [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
+    [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
+    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
+])
+y_sample = np.array([2.5, 1.0, 4.0, 1.1])
 
-uploaded_file = st.file_uploader("📂 Upload crash data CSV", type=["csv"])
-crash_values = []
+# --- Upload Section ---
+with st.expander("📂 Upload CSV to Train Model"):
+    uploaded_file = st.file_uploader("Upload a CSV file containing crash multipliers (e.g. 1.05x, 2.0x)", type=["csv"])
+    if uploaded_file:
+        crash_values = preprocess_csv(uploaded_file)
+    else:
+        crash_values = []
 
-if uploaded_file:
-    crash_values = preprocess_csv(uploaded_file)
-    st.success("Data loaded successfully!")
-
-if crash_values:
-    st.write("🔢 Preview of parsed values:", crash_values[-10:])
-
+# --- Model Training ---
 model = GradientBoostingRegressor()
-X_data = []
-y_data = []
+model.fit(X_sample, y_sample)
 
-if len(crash_values) > 10:
-    for i in range(10, len(crash_values)):
-        features = extract_features(crash_values[:i])
-        if features is not None:
-            X_data.append(features[0])
-            y_data.append(crash_values[i])
+# --- Prediction Interface ---
+with st.expander("🧠 Train / Predict"):
+    input_text = st.text_input("Enter recent crash multipliers (comma-separated):")
+    user_feedback = st.text_input("Actual next multiplier (optional, for training):")
+    train_button = st.button("Train with Feedback")
 
-if X_data and y_data:
-    model.fit(np.array(X_data), np.array(y_data))
-    last_features = extract_features(crash_values)
-    if last_features is not None:
-        prediction = model.predict(last_features)[0]
+    # Parse input manually
+    if input_text:
+        try:
+            values = [float(x.strip().replace("x", "")) for x in input_text.split(",")]
+            crash_values = [min(x, 10.5) if x > 10.99 else x for x in values]
+        except:
+            st.error("❌ Error parsing input values.")
+
+    # Feedback training
+    if train_button and crash_values:
+        try:
+            feedback = float(user_feedback.strip().replace("x", ""))
+            feedback = min(feedback, 10.5)
+            new_feat = extract_features(crash_values)
+            if new_feat is not None:
+                X_sample = np.vstack([X_sample, new_feat])
+                y_sample = np.append(y_sample, feedback)
+                model.fit(X_sample, y_sample)
+                st.success("✅ Model trained with your feedback!")
+        except:
+            st.error("❌ Feedback must be a number")
+
+# --- Prediction Output ---
+if crash_values:
+    features = extract_features(crash_values)
+    if features is not None:
+        prediction = model.predict(features)[0]
         safe_target = round(prediction * 0.97, 2)
-
-        st.subheader(f"📈 Predicted Next Multiplier: `{prediction:.2f}`")
-        st.success(f"🎯 Safe Target (3% margin): `{safe_target:.2f}`")
+        st.subheader(f"📈 Predicted next crash: `{prediction:.2f}`")
+        st.success(f"🎯 Safe target multiplier (3% edge): `{safe_target:.2f}`")
 
         st.subheader("📊 Indicators")
         st.text(f"Mean: {np.mean(crash_values[-10:]):.2f}")
         st.text(f"Std Dev: {np.std(crash_values[-10:]):.2f}")
-        st.text(f"Change: {(crash_values[-1] - crash_values[-2]):.2f}")
+        st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}" if len(crash_values) > 1 else "N/A")
 
-        st.subheader("📉 Recent Multiplier Chart")
+        # Chart
+        st.subheader("📉 Recent Crash Chart")
         fig, ax = plt.subplots()
-        ax.plot(crash_values[-30:], marker='o', label='Crash History')
+        ax.plot(crash_values[-20:], marker='o', label='Recent Crashes')
         ax.axhline(np.mean(crash_values[-10:]), color='red', linestyle='--', label='Mean')
         ax.legend()
         st.pyplot(fig)
 
-        # Comparison Table
-        if len(y_data) >= 5:
-            predicted_vals = model.predict(np.array(X_data[-30:]))
-            comparison_df = pd.DataFrame({
-                "Predicted": predicted_vals.round(2),
-                "Actual": np.array(y_data[-30:]).round(2),
-                "Error": np.abs(predicted_vals - y_data[-30:]).round(2)
-            })
-            st.subheader("🧾 Predicted vs Actual (Last 30)")
-            st.dataframe(comparison_df)
+# --- Accuracy Comparison Table ---
+if len(y_sample) >= 5:
+    st.subheader("🧾 Predicted vs Actual (Last 30 Entries)")
+    predicted_y = model.predict(X_sample[-30:])
+    df_compare = pd.DataFrame({
+        "Predicted": predicted_y.round(2),
+        "Actual": y_sample[-30:].round(2),
+        "Error": np.abs(predicted_y - y_sample[-30:]).round(2)
+    })
+    st.dataframe(df_compare)
 
-            # CSV Export
-            if st.button("📥 Export Predictions to CSV"):
-                filename = f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                comparison_df.to_csv(filename, index=False)
-                st.success(f"Predictions exported as `{filename}`")
-
-            # Optional Google Sheets Export
-            # if st.button("📤 Export to Google Sheets"):
-            #     credentials, _ = default()
-            #     client = Client(auth=credentials)
-            #     spread = Spread("Your Google Sheet Name", client=client)
-            #     spread.df_to_sheet(comparison_df, sheet="Sheet1", index=False, replace=True)
-            #     st.success("Exported to Google Sheets!")
-
+    # Accuracy chart
+    st.subheader("📈 Live Accuracy Trend (Last 30)")
+    fig2, ax2 = plt.subplots()
+    ax2.plot(df_compare["Error"], marker='x', color='orange', label='Absolute Error')
+    ax2.set_ylabel("Prediction Error")
+    ax2.set_xlabel("Round")
+    ax2.legend()
+    st.pyplot(fig2)

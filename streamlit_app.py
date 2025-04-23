@@ -1,16 +1,41 @@
-# crash_predictor_app.py
-
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+import os
 from sklearn.linear_model import LinearRegression
 
-# App title
 st.title("Crash Predictor App 🚀")
 
-# User input
-input_text = st.text_input("Enter recent crash multipliers (comma-separated)")
-user_feedback = st.text_input("Actual next multiplier (optional, for training)")
+# JSON storage path
+DATA_FILE = "training_data.json"
+
+# Load stored training data
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+            return np.array(data["features"]), np.array(data["labels"])
+    else:
+        # Fallback if no data yet
+        return (
+            np.array([
+                [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
+                [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
+                [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
+                [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
+            ]),
+            np.array([2.5, 1.0, 4.0, 1.1])
+        )
+
+# Save training data to file
+def save_data(features, labels):
+    data = {
+        "features": features.tolist(),
+        "labels": labels.tolist()
+    }
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
 
 # Cap values over 10.99 to 10.5
 def parse_input(text):
@@ -21,9 +46,6 @@ def parse_input(text):
     except:
         return []
 
-crash_values = parse_input(input_text)
-
-# Feature extraction
 def extract_features(values):
     if len(values) < 5:
         return None
@@ -39,17 +61,18 @@ def extract_features(values):
         ]
     ])
 
-# Sample training data
-X_sample = np.array([
-    [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
-    [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
-    [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
-    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1]
-])
-y_sample = np.array([2.5, 1.0, 4.0, 1.1])
+# Load data
+X_sample, y_sample = load_data()
 
+# Train model
 model = LinearRegression()
 model.fit(X_sample, y_sample)
+
+# Inputs
+input_text = st.text_input("Enter recent crash multipliers (comma-separated)")
+user_feedback = st.text_input("Actual next multiplier (optional, for training)")
+
+crash_values = parse_input(input_text)
 
 if crash_values:
     features = extract_features(crash_values)
@@ -64,7 +87,7 @@ if crash_values:
         st.text(f"Std Dev: {np.std(crash_values[-5:]):.2f}")
         st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}")
 
-# Train model with feedback
+# Feedback training
 if st.button("Train with Feedback"):
     try:
         feedback = float(user_feedback.strip())
@@ -74,12 +97,13 @@ if st.button("Train with Feedback"):
         if new_features is not None:
             X_sample = np.vstack([X_sample, new_features])
             y_sample = np.append(y_sample, feedback)
+            save_data(X_sample, y_sample)
             model.fit(X_sample, y_sample)
-            st.success("Model trained with your input (session only)")
+            st.success("Model trained with your input and saved!")
     except:
         st.error("Feedback must be a number")
 
-# Plot chart
+# Chart
 if crash_values:
     st.subheader("📉 Recent Crash Chart")
     fig, ax = plt.subplots()

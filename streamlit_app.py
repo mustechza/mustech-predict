@@ -1,36 +1,15 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
 
-st.title("Crash Predictor App 🚀")
+st.set_page_config(page_title="Crash Predictor App", layout="centered")
+st.title("🚀 Crash Predictor App")
 
-# Hardcoded initial training data
-X_sample = np.array([
-    [2.0, 0.5, 2.5, 2.8, 1.5, 0.5],
-    [1.2, 0.3, 1.0, 1.5, 0.9, -0.2],
-    [3.5, 0.7, 4.0, 4.5, 2.9, 1.0],
-    [1.0, 0.1, 1.1, 1.3, 0.8, 0.1],
-    [2.3, 0.4, 2.2, 2.6, 1.9, -0.1],
-    [3.0, 0.6, 3.5, 3.8, 2.7, 0.5]
-])
-y_sample = np.array([2.5, 1.0, 4.0, 1.1, 2.2, 3.4])
-
-# Input section
-with st.form("prediction_form"):
-    input_text = st.text_input("Enter recent crash multipliers (comma-separated):")
-    user_feedback = st.text_input("Actual next multiplier (optional, for training):")
-    submitted = st.form_submit_button("Train with Feedback & Predict")
-
-# Parse crash input
-def parse_input(text):
-    try:
-        raw = [float(x.strip().replace("x", "")) for x in text.split(",") if x.strip()]
-        capped = [min(x, 10.5) if x > 10.99 else x for x in raw]
-        return capped
-    except:
-        return []
+# File upload
+uploaded_file = st.file_uploader("📂 Upload CSV file (e.g., 1.23x format)", type=["csv"])
 
 def extract_features(values):
     if len(values) < 10:
@@ -39,77 +18,106 @@ def extract_features(values):
     return np.array([[
         np.mean(last),
         np.std(last),
-        last[-1],
         max(last),
         min(last),
-        last[-1] - last[-2] if len(last) > 1 else 0
+        last[-1] - last[-2],
+        np.median(last),
+        last[-1],
+        last[-2],
+        sum(last[-3:]) / 3,
+        last[0]
     ]])
 
-# Train model
-model = RandomForestRegressor(n_estimators=200, random_state=42)
-model.fit(X_sample, y_sample)
+@st.cache_data
+def preprocess_csv(file):
+    df = pd.read_csv(file)
+    values = df[df.columns[0]].astype(str).str.replace("x", "").astype(float)
+    values = values[values < 100]  # Remove outliers
+    return values.tolist()
 
-# On submit
-crash_values = parse_input(input_text)
-if submitted and crash_values:
-    features = extract_features(crash_values)
-    if features is not None:
-        # Predict
-        prediction = model.predict(features)[0]
-        safe_target = round(prediction * 0.97, 2)
+def prepare_training_set(series):
+    X, y = [], []
+    for i in range(10, len(series)):
+        feat = extract_features(series[i-10:i])
+        if feat is not None:
+            X.append(feat[0])
+            y.append(series[i])
+    return np.array(X), np.array(y)
 
-        st.subheader(f"📈 Predicted next crash: {prediction:.2f}")
-        st.success(f"🎯 Safe target multiplier (3% edge): {safe_target:.2f}")
+model = None
+X_sample, y_sample = None, None
 
-        # Handle feedback
+if uploaded_file:
+    crash_values = preprocess_csv(uploaded_file)
+    X_sample, y_sample = prepare_training_set(crash_values)
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_sample, y_sample)
+    st.success("✅ Model trained from uploaded file!")
+
+    st.subheader("🎯 Input & Feedback")
+    input_text = st.text_input("Enter recent crash multipliers (comma-separated):")
+    user_feedback = st.text_input("Actual next multiplier (optional, for training)")
+    submit_train = st.button("Train with Feedback")
+
+    parsed = []
+    if input_text:
         try:
-            if user_feedback:
-                feedback = float(user_feedback.strip().replace("x", ""))
-                if feedback > 10.99:
-                    feedback = 10.5
-                X_sample = np.vstack([X_sample, features])
-                y_sample = np.append(y_sample, feedback)
-                model.fit(X_sample, y_sample)
-                st.success("✅ Model trained with your feedback!")
+            parsed = [float(x.replace("x", "").strip()) for x in input_text.split(",") if x.strip()]
         except:
-            st.error("⚠️ Feedback must be a number")
+            st.error("Invalid input format.")
 
-        # Indicators
+    if parsed:
+        features = extract_features(parsed)
+        if features is not None:
+            pred = model.predict(features)[0]
+            safe_target = round(pred * 0.97, 2)
+            st.subheader(f"📈 Predicted next crash: {pred:.2f}")
+            st.success(f"🎯 Safe target multiplier (3% edge): {safe_target:.2f}")
+
+    if submit_train and user_feedback:
+        try:
+            feedback_val = float(user_feedback)
+            new_feat = extract_features(parsed)
+            if new_feat is not None:
+                X_sample = np.vstack([X_sample, new_feat])
+                y_sample = np.append(y_sample, feedback_val)
+                model.fit(X_sample, y_sample)
+                st.success("✅ Model updated with your feedback.")
+        except:
+            st.error("Feedback must be a number.")
+
+    if parsed and len(parsed) >= 10:
         st.subheader("📊 Indicators")
-        st.text(f"Mean: {np.mean(crash_values[-5:]):.2f}")
-        st.text(f"Std Dev: {np.std(crash_values[-5:]):.2f}")
-        st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}")
+        st.text(f"Mean: {np.mean(parsed[-10:]):.2f}")
+        st.text(f"Std Dev: {np.std(parsed[-10:]):.2f}")
+        st.text(f"Last Change: {parsed[-1] - parsed[-2]:.2f}")
 
-        # Chart
+    if parsed:
         st.subheader("📉 Recent Crash Chart")
         fig, ax = plt.subplots()
-        ax.plot(crash_values[-10:], marker='o', label='Recent')
-        ax.axhline(np.mean(crash_values[-5:]), color='r', linestyle='--', label='Mean')
+        ax.plot(parsed[-20:], marker='o', label='Recent')
+        ax.axhline(np.mean(parsed[-10:]), color='r', linestyle='--', label='Mean')
         ax.legend()
         st.pyplot(fig)
 
-        # Compare last 30 predictions
-        if len(y_sample) >= 5:
-            last_X = X_sample[-30:]
-            last_y = y_sample[-30:]
-            predicted_y = model.predict(last_X)
-            df_compare = pd.DataFrame({
-                "Predicted": predicted_y.round(2),
-                "Actual": last_y.round(2),
-                "Abs Error": np.abs(predicted_y - last_y).round(2)
-            })
-            st.subheader("🧾 Predicted vs Actual (Last 30)")
-            st.dataframe(df_compare)
+    if len(X_sample) >= 30:
+        st.subheader("📋 Predicted vs Actual (Last 30)")
+        preds = model.predict(X_sample[-30:])
+        comp_df = pd.DataFrame({
+            "Predicted": preds.round(2),
+            "Actual": y_sample[-30:].round(2),
+            "Error": np.abs(preds - y_sample[-30:]).round(2)
+        })
+        st.dataframe(comp_df)
 
-            # Live Accuracy Chart
-            st.subheader("📈 Accuracy Trend (Last 30)")
-            fig2, ax2 = plt.subplots()
-            ax2.plot(100 - np.abs((predicted_y - last_y) / last_y * 100), label='Accuracy (%)', color='green')
-            ax2.set_ylim(0, 110)
-            ax2.set_ylabel("Accuracy %")
-            ax2.set_xlabel("Prediction #")
-            ax2.axhline(97, linestyle="--", color="red", label="Target")
-            ax2.legend()
-            st.pyplot(fig2)
-    else:
-        st.warning("Please enter at least 10 crash multipliers for prediction.")
+        st.subheader("📈 Accuracy Trend")
+        fig2, ax2 = plt.subplots()
+        ax2.plot(comp_df["Error"], label="Absolute Error", marker='o')
+        ax2.set_ylabel("Prediction Error")
+        ax2.set_xlabel("Last 30 Predictions")
+        ax2.axhline(np.mean(comp_df["Error"]), color='red', linestyle='--', label='Mean Error')
+        ax2.legend()
+        st.pyplot(fig2)
+else:
+    st.info("Please upload a CSV file to begin training.")

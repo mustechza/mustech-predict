@@ -2,15 +2,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 # GitHub raw CSV URL
 CSV_URL = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
 
 st.title("🚀 Crash Predictor App")
 
-# Load training data
+# ==================
+# 📥 Load Training Data
+# ==================
 @st.cache_data
 def load_training_data(url):
     df = pd.read_csv(url)
@@ -19,17 +20,22 @@ def load_training_data(url):
         st.error("CSV must contain a 'target' column.")
         return None, None
     X = df.drop(columns=['target'])
-    y = df['target'].apply(lambda x: min(x, 10.5))  # Cap values > 10.99
+    y = df['target'].apply(lambda x: min(x, 10.5))
     return X, y
 
 X_train, y_train = load_training_data(CSV_URL)
 
-# Train model
-model = GradientBoostingRegressor()
-model.fit(X_train, y_train)
+# ==================
+# 🤖 Initialize Models
+# ==================
+gb_model = GradientBoostingRegressor()
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+
+gb_model.fit(X_train, y_train)
+rf_model.fit(X_train, y_train)
 
 # ==================
-# 📥 Input Section
+# 📥 User Input Form
 # ==================
 st.header("📥 Input & Feedback")
 with st.form("input_form"):
@@ -37,7 +43,6 @@ with st.form("input_form"):
     feedback_value = st.text_input("Actual next multiplier (optional, for training)")
     submitted = st.form_submit_button("🔁 Train with Feedback")
 
-# Parse input
 def parse_input(text):
     try:
         raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
@@ -46,19 +51,13 @@ def parse_input(text):
     except:
         return []
 
-# Feature extraction
 def extract_features(values):
     if len(values) < 10:
         return None
     last_vals = values[-10:]
-    return np.array([[
-        np.mean(last_vals),
-        np.std(last_vals),
-        last_vals[-1],
-        max(last_vals),
-        min(last_vals),
-        last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0,
-    ]])
+    return np.array([[np.mean(last_vals), np.std(last_vals), last_vals[-1],
+                      max(last_vals), min(last_vals),
+                      last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0]])
 
 crash_values = parse_input(recent_input)
 features = extract_features(crash_values) if crash_values else None
@@ -67,10 +66,12 @@ features = extract_features(crash_values) if crash_values else None
 # 🔮 Prediction
 # ==================
 if features is not None:
-    prediction = model.predict(features)[0]
-    safe_target = round(prediction * 0.97, 2)
-    st.subheader(f"🎯 Predicted next crash: {prediction:.2f}")
-    st.success(f"🛡️ Safe multiplier target (3% edge): {safe_target:.2f}")
+    gb_pred = gb_model.predict(features)[0]
+    rf_pred = rf_model.predict(features)[0]
+    st.subheader("🎯 Predicted next crash")
+    st.text(f"Gradient Boosting: {gb_pred:.2f}")
+    st.text(f"Random Forest: {rf_pred:.2f}")
+    st.success(f"🛡️ Suggested Safe Target: {round(min(gb_pred, rf_pred) * 0.97, 2)}")
 
 # ==================
 # 📊 Indicators
@@ -81,7 +82,6 @@ if crash_values:
     st.text(f"Std Dev: {np.std(crash_values[-10:]):.2f}")
     st.text(f"Last Change: {(crash_values[-1] - crash_values[-2]):.2f}" if len(crash_values) > 1 else "N/A")
 
-    # Chart
     st.subheader("📉 Crash History (Last 10)")
     fig, ax = plt.subplots()
     ax.plot(crash_values[-10:], marker='o')
@@ -90,7 +90,7 @@ if crash_values:
     st.pyplot(fig)
 
 # ==================
-# 📥 Feedback Training (Live)
+# 📥 Feedback Retraining
 # ==================
 if submitted and features is not None:
     try:
@@ -98,33 +98,35 @@ if submitted and features is not None:
         feedback = min(feedback, 10.5)
         X_train = pd.concat([X_train, pd.DataFrame(features, columns=X_train.columns)], ignore_index=True)
         y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
-        model.fit(X_train, y_train)
+        gb_model.fit(X_train, y_train)
+        rf_model.fit(X_train, y_train)
         st.success("Model retrained with feedback!")
     except:
         st.error("Invalid feedback value. Please enter a number.")
 
 # ==================
-# 📈 Accuracy Table
+# 📈 Accuracy Comparison
 # ==================
-st.header("📈 Recent Accuracy (Last 30 Predictions)")
+st.header("📈 Model Performance Comparison (Last 30 Predictions)")
 if len(X_train) >= 30:
     sample_X = X_train.tail(30)
     sample_y = y_train.tail(30)
-    preds = model.predict(sample_X)
-    df_accuracy = pd.DataFrame({
-        "Predicted": preds.round(2),
-        "Actual": sample_y.round(2),
-        "Error": np.abs(preds - sample_y).round(2)
-    })
-    st.dataframe(df_accuracy)
+    gb_preds = gb_model.predict(sample_X)
+    rf_preds = rf_model.predict(sample_X)
 
-    # Trend chart
-    st.subheader("📊 Accuracy Trend")
-    fig2, ax2 = plt.subplots()
-    ax2.plot(np.abs(preds - sample_y), label='Absolute Error', marker='o')
-    ax2.set_title("Prediction Error Over Last 30")
-    ax2.set_ylabel("Error")
-    ax2.legend()
-    st.pyplot(fig2)
+    df_perf = pd.DataFrame({
+        "GradientBoosting Error": np.abs(gb_preds - sample_y),
+        "RandomForest Error": np.abs(rf_preds - sample_y),
+    })
+
+    st.dataframe(df_perf.round(2))
+
+    fig3, ax3 = plt.subplots()
+    ax3.plot(df_perf["GradientBoosting Error"], label="Gradient Boosting", marker='o')
+    ax3.plot(df_perf["RandomForest Error"], label="Random Forest", marker='x')
+    ax3.set_title("📊 Prediction Error Comparison")
+    ax3.set_ylabel("Absolute Error")
+    ax3.legend()
+    st.pyplot(fig3)
 else:
-    st.warning("Not enough data to show accuracy trends.")
+    st.warning("Not enough data to compare model performance.")

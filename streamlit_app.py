@@ -3,52 +3,50 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.ensemble import GradientBoostingRegressor
-import os
+from sklearn.metrics import mean_absolute_error
 
-st.set_page_config(layout="wide")
-
+# App Configuration
 CSV_URL = "https://raw.githubusercontent.com/mustechza/mustech-predict/main/training_data_mock.csv"
-PERSISTENCE_FILE = "crash_training_data.csv"
-WIN_LOG_FILE = "win_loss_log.csv"
+THRESHOLD_ALERT = 2.0  # Define a "safe" multiplier threshold
 
-st.title("🚀 Crash Predictor App")
-
-# Load and persist training data
-def load_persistent_data():
-    if os.path.exists(PERSISTENCE_FILE):
-        df = pd.read_csv(PERSISTENCE_FILE)
-    else:
-        df = pd.read_csv(CSV_URL)
+# Load Training Data
+@st.cache_data
+def load_training_data(url):
+    df = pd.read_csv(url)
     df.columns = [c.lower().strip() for c in df.columns]
     if 'target' not in df.columns:
-        return pd.DataFrame(), pd.Series()
+        st.error("CSV must contain a 'target' column.")
+        return None, None
     X = df.drop(columns=['target'])
-    y = df['target'].apply(lambda x: min(x, 10.5))
+    y = df['target'].apply(lambda x: min(x, 10.5))  # Cap values
     return X, y
 
-def save_persistent_data(X, y):
-    df = X.copy()
-    df['target'] = y
-    df.to_csv(PERSISTENCE_FILE, index=False)
+X_train, y_train = load_training_data(CSV_URL)
+model = GradientBoostingRegressor()
+model.fit(X_train, y_train)
 
-# Win/loss logging
-def load_win_log():
-    if os.path.exists(WIN_LOG_FILE):
-        return pd.read_csv(WIN_LOG_FILE).tail(20)
-    return pd.DataFrame(columns=['Predicted', 'Actual', 'Outcome'])
+# App Title
+st.title("🎯 Crash Predictor + Money Manager")
 
-def save_to_win_log(pred, actual):
-    outcome = 'Win' if actual >= pred * 0.97 else 'Loss'
-    log = load_win_log()
-    log = pd.concat([log, pd.DataFrame([{
-        'Predicted': round(pred, 2),
-        'Actual': round(actual, 2),
-        'Outcome': outcome
-    }])]).tail(20)
-    log.to_csv(WIN_LOG_FILE, index=False)
-    return log
+# Input + Prediction
+st.header("📥 Input")
+with st.form("input_form"):
+    recent_input = st.text_input("Enter recent crash multipliers (comma-separated)")
+    feedback_value = st.text_input("Actual next multiplier (optional)")
+    strategy = st.selectbox("💸 Choose Strategy", ["Flat Betting", "Martingale", "Anti-Martingale"])
+    bankroll = st.number_input("💰 Starting Bankroll", value=100.0)
+    base_bet = st.number_input("🎯 Base Bet Amount", value=1.0)
+    risk_threshold = st.slider("⚠️ Risk Threshold (stop if bankroll below)", min_value=0.0, max_value=100.0, value=10.0)
+    submitted = st.form_submit_button("🔁 Submit")
 
-# Feature & input handling
+def parse_input(text):
+    try:
+        raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
+        capped = [min(x, 10.5) for x in raw]
+        return capped
+    except:
+        return []
+
 def extract_features(values):
     if len(values) < 10:
         return None
@@ -57,114 +55,96 @@ def extract_features(values):
                       max(last_vals), min(last_vals),
                       last_vals[-1] - last_vals[-2] if len(last_vals) > 1 else 0]])
 
-def parse_input(text):
-    try:
-        raw = [float(x.strip().lower().replace('x', '')) for x in text.split(',') if x.strip()]
-        capped = [min(x, 10.5) if x > 10.99 else x for x in raw]
-        return capped
-    except:
-        return []
-
-# Load and train
-X_train, y_train = load_persistent_data()
-model = GradientBoostingRegressor()
-model.fit(X_train, y_train)
-
-# ==================
-# 📥 Input Section
-# ==================
-st.header("📥 Input & Feedback")
-with st.form("input_form"):
-    crash_text = st.text_input("Enter recent crash multipliers (comma-separated)")
-    next_multiplier = st.text_input("Next actual multiplier (for feedback)")
-    submitted = st.form_submit_button("🔁 Submit")
-
-crash_values = parse_input(crash_text)
+crash_values = parse_input(recent_input)
 features = extract_features(crash_values) if crash_values else None
 
-# ==================
-# 🔮 Prediction
-# ==================
 if features is not None:
     prediction = model.predict(features)[0]
     safe_target = round(prediction * 0.97, 2)
-    st.subheader(f"🎯 Predicted next crash: {prediction:.2f}")
-    st.success(f"🛡️ Safe multiplier target (3% edge): {safe_target:.2f}")
+    st.subheader(f"🎯 Predicted: {prediction:.2f}")
+    st.success(f"🛡️ Safe Multiplier Target (3% edge): {safe_target:.2f}")
 
-    # Alerts
-    if prediction >= 8.0:
-        st.warning("⚠️ Very high prediction — rare event!")
-    elif prediction <= 1.5:
-        st.warning("🔻 Very low prediction — consider avoiding!")
+    # Threshold Alert
+    if prediction < THRESHOLD_ALERT:
+        st.warning(f"⚠️ Alert: Prediction below safety threshold ({THRESHOLD_ALERT}x)")
 
-# ==================
-# 📥 Feedback + Retrain
-# ==================
-if submitted and features is not None:
-    try:
-        feedback = float(next_multiplier)
-        feedback = min(feedback, 10.5)
-        X_train = pd.concat([X_train, pd.DataFrame(features, columns=X_train.columns)], ignore_index=True)
-        y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
-        save_persistent_data(X_train, y_train)
-        model.fit(X_train, y_train)
-        save_to_win_log(prediction, feedback)
-        st.success("Model retrained and feedback logged!")
-    except:
-        st.error("Invalid feedback value.")
+    # Feedback Handling
+    if submitted and feedback_value:
+        try:
+            feedback = min(float(feedback_value), 10.5)
+            X_train = pd.concat([X_train, pd.DataFrame(features, columns=X_train.columns)], ignore_index=True)
+            y_train = pd.concat([y_train, pd.Series([feedback])], ignore_index=True)
+            model.fit(X_train, y_train)
+            st.success("Model retrained with feedback!")
 
-# ==================
-# 📊 Indicators
-# ==================
-if crash_values:
-    st.subheader("📊 Crash History (Last 10)")
-    fig, ax = plt.subplots()
-    ax.plot(crash_values[-10:], marker='o')
-    ax.axhline(np.mean(crash_values[-10:]), color='r', linestyle='--', label='Mean')
-    ax.legend()
-    st.pyplot(fig)
+            # Append new multiplier to recent input
+            crash_values.append(feedback)
+        except:
+            st.error("Invalid feedback value.")
 
-# ==================
-# 📈 Accuracy Trend
-# ==================
-if len(X_train) >= 30:
-    st.subheader("📈 Recent Prediction Accuracy (Last 30)")
-    sample_X = X_train.tail(30)
-    sample_y = y_train.tail(30)
-    preds = model.predict(sample_X)
-    df_accuracy = pd.DataFrame({
+# Win/Loss Tracker
+if len(X_train) >= 20:
+    st.header("📈 Prediction Accuracy (Last 20)")
+    preds = model.predict(X_train.tail(20))
+    actuals = y_train.tail(20).values
+    outcomes = (preds.round(2) <= actuals.round(2))
+    result_df = pd.DataFrame({
         "Predicted": preds.round(2),
-        "Actual": sample_y.round(2),
-        "Error": np.abs(preds - sample_y).round(2)
+        "Actual": actuals.round(2),
+        "Result": ["✅ Win" if x else "❌ Loss" for x in outcomes]
     })
-    st.dataframe(df_accuracy)
+    st.dataframe(result_df.style.applymap(
+        lambda val: 'background-color: #d4edda' if val == "✅ Win" else 'background-color: #f8d7da',
+        subset=["Result"]
+    ))
 
-    st.subheader("📊 Accuracy Trend")
-    fig2, ax2 = plt.subplots()
-    ax2.plot(np.abs(preds - sample_y), label='Absolute Error', marker='o')
-    ax2.set_ylabel("Error")
-    ax2.set_title("Prediction Error Over Time")
-    ax2.legend()
-    st.pyplot(fig2)
+    # Summary Stats
+    win_rate = np.mean(outcomes)
+    st.metric("🏆 Win Rate", f"{win_rate*100:.1f}%")
+    st.metric("✅ Wins", int(np.sum(outcomes)))
+    st.metric("❌ Losses", int(np.sum(~outcomes)))
 
-# ==================
-# ✅ Win/Loss Table
-# ==================
-st.subheader("🧾 Last 20 Wins/Losses")
-log = load_win_log()
-if not log.empty:
-    def color_row(row):
-        if row['Outcome'] == 'Win':
-            return ['background-color: #d4edda']*3
+# ================================
+# 💸 Money Management Simulation
+# ================================
+if submitted and features is not None:
+    st.header("💸 Strategy Simulation")
+    simulated_bankroll = bankroll
+    current_bet = base_bet
+    logs = []
+
+    for pred, actual in zip(preds, actuals):
+        win = pred <= actual
+        logs.append({
+            "Bankroll Before": simulated_bankroll,
+            "Bet": current_bet,
+            "Prediction": round(pred, 2),
+            "Actual": round(actual, 2),
+            "Win": win
+        })
+        if win:
+            simulated_bankroll += current_bet
+            if strategy == "Anti-Martingale":
+                current_bet *= 2
+            else:
+                current_bet = base_bet
         else:
-            return ['background-color: #f8d7da']*3
+            simulated_bankroll -= current_bet
+            if strategy == "Martingale":
+                current_bet *= 2
+            else:
+                current_bet = base_bet
 
-    styled_log = log.style.apply(color_row, axis=1)
-    st.dataframe(styled_log)
+        # Stop if risk threshold crossed
+        if simulated_bankroll < risk_threshold:
+            break
 
-    # Summary
-    win_count = (log['Outcome'] == 'Win').sum()
-    loss_count = (log['Outcome'] == 'Loss').sum()
-    total = len(log)
-    win_rate = (win_count / total) * 100 if total > 0 else 0
-    st.markdown(f"✅ **Wins:** {win_count} &nbsp;&nbsp;&nbsp; ❌ **Losses:** {loss_count} &nbsp;&nbsp;&nbsp; 🎯 **Win Rate:** {win_rate:.2f}%")
+    log_df = pd.DataFrame(logs)
+    st.dataframe(log_df.style.applymap(
+        lambda v: 'background-color: #d4edda' if v is True else 'background-color: #f8d7da',
+        subset=["Win"]
+    ))
+
+    st.subheader("💹 Final Result")
+    st.metric("Final Bankroll", f"{simulated_bankroll:.2f}")
+    st.metric("Profit/Loss", f"{simulated_bankroll - bankroll:.2f}")

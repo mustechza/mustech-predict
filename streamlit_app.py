@@ -6,7 +6,7 @@ import datetime
 api_key = 'your_api_key'
 api_secret = 'your_api_secret'
 
-client = Client(JlWm8rVqQBu7oWTBYvMZexkZWQ2uDzyXy5rEDBIvEOS8hR1vPYHt3XTZQO4KwZB4,pQsLSn50rGz3Nxur5I9wvNKR1CHkCXFevGe2Qa7hSGu0HV8lb74r3OBQO0vrsrlb)
+client = Client(JlWm8rVqQBu7oWTBYvMZexkZWQ2uDzyXy5rEDBIvEOS8hR1vPYHt3XTZQO4KwZB4, pQsLSn50rGz3Nxur5I9wvNKR1CHkCXFevGe2Qa7hSGu0HV8lb74r3OBQO0vrsrlb)
 
 # Define the symbol for BTC/USDT pair
 symbol = 'BTCUSDT'

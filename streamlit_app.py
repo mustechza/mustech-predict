@@ -1,4 +1,9 @@
-import streamlit as st import pandas as pd import datetime from binance.client import Client from binance.exceptions import BinanceAPIException import plotly.graph_objs as go
+import streamlit as st
+import pandas as pd
+import datetime
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+import plotly.graph_objs as go
 
 st.set_page_config(page_title="Binance Backtester", layout="wide") st.title("Binance-Backed Trading Signal Backtester")
 

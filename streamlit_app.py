@@ -1,89 +1,45 @@
-import streamlit as st
-import pandas as pd
-from binance.client import Client
-import time
+import streamlit as st import pandas as pd import datetime from binance.client import Client from binance.exceptions import BinanceAPIException import plotly.graph_objs as go
 
-# Binance credentials (for public endpoints, no need for keys)
-client = Client()
+st.set_page_config(page_title="Binance Backtester", layout="wide") st.title("Binance-Backed Trading Signal Backtester")
 
-# Supported symbols
-symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "LTCUSDT"]
+--- User API Key Input ---
 
-# Function to fetch candles
-@st.cache_data(show_spinner=False)
-def fetch_binance_data(symbol):
-    klines = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=500)
-    df = pd.DataFrame(klines, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'number_of_trades',
-        'taker_buy_base', 'taker_buy_quote', 'ignore'
-    ])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-    return df
+st.sidebar.header("Binance API Credentials") api_key = st.sidebar.text_input("API Key", type="password") api_secret = st.sidebar.text_input("API Secret", type="password")
 
-# Simple EMA Crossover strategy
-def ema_cross_strategy(df):
-    df['EMA5'] = df['close'].ewm(span=5).mean()
-    df['EMA20'] = df['close'].ewm(span=20).mean()
-    df['Signal'] = 0
-    df.loc[df['EMA5'] > df['EMA20'], 'Signal'] = 1
-    df.loc[df['EMA5'] < df['EMA20'], 'Signal'] = -1
-    return df
+client = None if api_key and api_secret: try: client = Client(api_key=api_key, api_secret=api_secret) client.get_exchange_info()  # Validate connection st.sidebar.success("Connected to Binance API") except BinanceAPIException as e: st.sidebar.error(f"Binance API error: {e.message}") except Exception as e: st.sidebar.error(f"Connection failed: {str(e)}") else: st.sidebar.warning("Enter your API credentials")
 
-# Backtest with Martingale (2-step limit)
-def backtest_martingale(df, bet=1.0, limit=2):
-    balance = 100
-    position = 0
-    steps = 0
-    history = []
+--- Asset & Interval Selection ---
 
-    for i in range(1, len(df)):
-        signal = df['Signal'].iloc[i-1]
-        outcome = 1 if df['close'].iloc[i] > df['close'].iloc[i-1] else -1
+if client: symbol = st.selectbox("Select Asset", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"]) interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "1d"]) limit = st.slider("Number of Candles", 100, 1000, 500)
 
-        if signal == 1:  # Buy signal
-            profit = bet * outcome
-            balance += profit
-            history.append((df.index[i], bet, profit, balance))
-            if outcome < 0 and steps < limit:
-                bet *= 2
-                steps += 1
-            else:
-                bet = 1.0
-                steps = 0
+if st.button("Fetch Historical Data"):
+    try:
+        raw_data = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        df = pd.DataFrame(raw_data, columns=[
+            "timestamp", "open", "high", "low", "close", "volume",
+            "close_time", "quote_asset_volume", "trades",
+            "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"])
 
-    return pd.DataFrame(history, columns=["Time", "Bet", "Profit", "Balance"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
+        df.set_index("timestamp", inplace=True)
+        df = df[["open", "high", "low", "close", "volume"]].astype(float)
 
-# Sidebar controls
-st.sidebar.title("Backtest Control")
-use_uploaded = st.sidebar.checkbox("Use uploaded CSV", False)
-selected_symbol = st.sidebar.selectbox("Select Asset", symbols)
+        st.success(f"Fetched {len(df)} candles for {symbol}")
+        st.dataframe(df.tail(10))
 
-# Upload or fetch
-if use_uploaded:
-    uploaded_file = st.sidebar.file_uploader("Upload CSV", type="csv")
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file, parse_dates=True, index_col=0)
-        st.success("File loaded.")
-    else:
-        st.stop()
-else:
-    with st.spinner(f"Fetching data for {selected_symbol}..."):
-        df = fetch_binance_data(selected_symbol)
+        # --- Chart ---
+        fig = go.Figure(data=[
+            go.Candlestick(x=df.index,
+                           open=df['open'], high=df['high'],
+                           low=df['low'], close=df['close'])
+        ])
+        fig.update_layout(title=f"{symbol} Price Chart ({interval})", xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
 
-# Show price chart
-st.subheader(f"{selected_symbol} - Last 500 candles")
-st.line_chart(df['close'])
+    except Exception as e:
+        st.error(f"Failed to fetch or process data: {e}")
 
-# Strategy and backtest
-st.subheader("Backtest Results (Martingale)")
-df = ema_cross_strategy(df)
-backtest_df = backtest_martingale(df)
-st.dataframe(backtest_df.tail(10))
-st.line_chart(backtest_df.set_index("Time")["Balance"])
+Footer
 
-# Final metrics
-st.metric("Final Balance", f"${backtest_df['Balance'].iloc[-1]:.2f}")
-st.metric("Total Trades", len(backtest_df))
+st.markdown("---") st.markdown("Developed for backtesting strategies with Binance historical data.")
+

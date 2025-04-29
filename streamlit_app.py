@@ -1,50 +1,31 @@
-import streamlit as st
-import pandas as pd
-import datetime
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
-import plotly.graph_objs as go
+import streamlit as st import pandas as pd import datetime from binance.client import Client from binance.exceptions import BinanceAPIException import plotly.graph_objs as go
 
 st.set_page_config(page_title="Binance Backtester", layout="wide") st.title("Binance-Backed Trading Signal Backtester")
 
---- User API Key Input ---
+st.sidebar.header("API Credentials") api_key = st.sidebar.text_input("API Key", type="password") api_secret = st.sidebar.text_input("API Secret", type="password")
 
-st.sidebar.header("Binance API Credentials") api_key = st.sidebar.text_input("API Key", type="password") api_secret = st.sidebar.text_input("API Secret", type="password")
+client = None if api_key and api_secret: try: client = Client(api_key, api_secret) client.ping() st.sidebar.success("API Connected") except BinanceAPIException as e: st.sidebar.error(f"API Error: {e.message}")
 
-client = None if api_key and api_secret: try: client = Client(api_key=api_key, api_secret=api_secret) client.get_exchange_info()  # Validate connection st.sidebar.success("Connected to Binance API") except BinanceAPIException as e: st.sidebar.error(f"Binance API error: {e.message}") except Exception as e: st.sidebar.error(f"Connection failed: {str(e)}") else: st.sidebar.warning("Enter your API credentials")
+st.sidebar.header("Data Parameters") symbol = st.sidebar.selectbox("Asset", ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]) interval = st.sidebar.selectbox("Interval", ["1m", "5m", "15m", "1h"]) limit = st.sidebar.slider("Number of Candles", min_value=100, max_value=1000, value=500)
 
---- Asset & Interval Selection ---
+if client: with st.spinner("Fetching data from Binance..."): try: klines = client.get_klines(symbol=symbol, interval=interval, limit=limit) df = pd.DataFrame(klines, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base", "taker_buy_quote", "ignore"]) df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms') df.set_index("timestamp", inplace=True) df = df[["open", "high", "low", "close", "volume"]].astype(float)
 
-if client: symbol = st.selectbox("Select Asset", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"]) interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "1d"]) limit = st.slider("Number of Candles", 100, 1000, 500)
+st.success(f"Loaded {len(df)} candles for {symbol} on {interval} interval.")
 
-if st.button("Fetch Historical Data"):
-    try:
-        raw_data = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        df = pd.DataFrame(raw_data, columns=[
-            "timestamp", "open", "high", "low", "close", "volume",
-            "close_time", "quote_asset_volume", "trades",
-            "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"])
-
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
-        df.set_index("timestamp", inplace=True)
-        df = df[["open", "high", "low", "close", "volume"]].astype(float)
-
-        st.success(f"Fetched {len(df)} candles for {symbol}")
-        st.dataframe(df.tail(10))
-
-        # --- Chart ---
-        fig = go.Figure(data=[
-            go.Candlestick(x=df.index,
-                           open=df['open'], high=df['high'],
-                           low=df['low'], close=df['close'])
-        ])
-        fig.update_layout(title=f"{symbol} Price Chart ({interval})", xaxis_rangeslider_visible=False)
+        # Display chart
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df["open"],
+            high=df["high"],
+            low=df["low"],
+            close=df["close"],
+            name="Price"
+        ))
         st.plotly_chart(fig, use_container_width=True)
 
-    except Exception as e:
-        st.error(f"Failed to fetch or process data: {e}")
+    except BinanceAPIException as e:
+        st.error(f"Error fetching data: {e.message}")
 
-Footer
-
-st.markdown("---") st.markdown("Developed for backtesting strategies with Binance historical data.")
+else: st.warning("Please enter your Binance API key and secret to proceed.")
 

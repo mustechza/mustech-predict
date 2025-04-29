@@ -1,36 +1,29 @@
-import streamlit as st 
-import pandas as pd 
-import datetime 
-from binance.client import Client 
-from binance.exceptions import BinanceAPIException 
-import plotly.graph_objs as go
+from binance.client import Client
+import pandas as pd
+import datetime
 
-st.set_page_config(page_title="Binance Backtester", layout="wide") st.title("Binance-Backed Trading Signal Backtester")
+# Binance API credentials
+api_key = 'your_api_key'
+api_secret = 'your_api_secret'
 
-st.sidebar.header("API Credentials") api_key = st.sidebar.text_input("API Key", type="password") api_secret = st.sidebar.text_input("API Secret", type="password")
+client = Client(api_key, api_secret)
 
-client = None if api_key and api_secret: try: client = Client(api_key, api_secret) client.ping() st.sidebar.success("API Connected") except BinanceAPIException as e: st.sidebar.error(f"API Error: {e.message}")
+# Define the symbol for BTC/USDT pair
+symbol = 'BTCUSDT'
 
-st.sidebar.header("Data Parameters") symbol = st.sidebar.selectbox("Asset", ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]) interval = st.sidebar.selectbox("Interval", ["1m", "5m", "15m", "1h"]) limit = st.sidebar.slider("Number of Candles", min_value=100, max_value=1000, value=500)
+# Define custom start and end time
+start_time = datetime.datetime(2024, 3, 15, 0, 0, 0)
+end_time = datetime.datetime(2024, 6, 15, 0, 0, 0)
 
-if client: with st.spinner("Fetching data from Binance..."): try: klines = client.get_klines(symbol=symbol, interval=interval, limit=limit) df = pd.DataFrame(klines, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base", "taker_buy_quote", "ignore"]) df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms') df.set_index("timestamp", inplace=True) df = df[["open", "high", "low", "close", "volume"]].astype(float)
+klines = client.get_historical_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, start_str=str(start_time), end_str=str(end_time))
 
-st.success(f"Loaded {len(df)} candles for {symbol} on {interval} interval.")
+# Convert the data into a pandas dataframe for easier manipulation
+df_M = pd.DataFrame(klines, columns=['Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close Time', 'Quote Asset Volume', 'Number of Trades', 'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume', 'Ignore'])
 
-        # Display chart
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=df.index,
-            open=df["open"],
-            high=df["high"],
-            low=df["low"],
-            close=df["close"],
-            name="Price"
-        ))
-        st.plotly_chart(fig, use_container_width=True)
 
-    except BinanceAPIException as e:
-        st.error(f"Error fetching data: {e.message}")
+columns_to_convert = ['Open', 'High', 'Low', 'Close', 'Volume', 'Quote Asset Volume', 'Number of Trades', 'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume']
 
-else: st.warning("Please enter your Binance API key and secret to proceed.")
+for col in columns_to_convert:
+    df_M[col] = df_M[col].astype(float)
 
+df_pepe_M

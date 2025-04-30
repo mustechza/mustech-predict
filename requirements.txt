@@ -1,5 +1,6 @@
 streamlit
 pandas
-matplotlib
-pandas_ta
 numpy
+plotly
+pandas_ta
+python-binance

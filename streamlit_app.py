@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 
 # --- Binance Setup ---
 API_KEY = 'your_api_key_here'
-API_SECRET = 'your_api_secret_here'
+API_SECRET = 'pQsLSn50rGz3Nxur5I9wvNKR1CHkCXFevGe2Qa7hSGu0HV8lb74r3OBQOOV rsrlb'
 client = Client(API_KEY, API_SECRET)
 
 # --- App Config ---

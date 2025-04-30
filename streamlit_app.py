@@ -6,7 +6,7 @@ from binance.client import Client
 import plotly.graph_objects as go
 
 # --- API Configuration ---
-client = Client()
+client = Client(None, None)  # No API keys, use public endpoints only
 
 # --- App Config ---
 st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")

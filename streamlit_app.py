@@ -7,7 +7,7 @@ import datetime
 from datetime import datetime
 
 # --- API Key (Hardcoded for now) ---
-ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_api_key_here"
+ALPHA_VANTAGE_API_KEY = "4VRCXGZ2KAY4NTXX"
 
 # --- App Config ---
 st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")

@@ -3,3 +3,4 @@ pandas
 python-binance
 ta
 matplotlib
+talib

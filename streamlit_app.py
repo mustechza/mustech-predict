@@ -11,7 +11,6 @@ import plotly.graph_objects as go
 API_KEY = 'JlWm8rVqQBu7oWTBYvMZexkZWQ2uDzyXy5rEDBIvEOS8hR1vPYHt3XTZQ04KwZB4'
 API_SECRET = 'pQsLSn50rGz3Nxur5I9wvNKR1CHkCXFevGe2Qa7hSGu0HV8lb74r3OBQOOVrsrlb'
 
-API
 client = Client(API_KEY, API_SECRET)
 
 # --- App Config ---

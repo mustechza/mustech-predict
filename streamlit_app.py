@@ -3,44 +3,23 @@ import pandas as pd
 import numpy as np
 import pandas_ta as ta
 import datetime
+import requests
 import plotly.graph_objects as go
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
+import time
 
-# --- Streamlit Config ---
-st.set_page_config(page_title="Binance Breakout Trading Dashboard", layout="wide")
-st.title("📊 Binance Breakout Trading Dashboard")
+# --- Auto-refresh every 60 sec ---
+st_autorefresh = st.experimental_rerun if st.button("🔄 Refresh Now") else None
+st_autorefresh = st_autorefresh or st.experimental_rerun if st.experimental_get_query_params().get("auto") else None
+st_autorefresh = st_autorefresh or st.experimental_rerun if time.time() % 60 < 1 else None
 
-# --- Load API Keys (Secrets or Manual Input) ---
-def get_api_keys():
-    if "binance" in st.secrets:
-        api_key = st.secrets["binance"]["api_key"]
-        api_secret = st.secrets["binance"]["api_secret"]
-        st.success("✅ Using API keys from Streamlit secrets.")
-    else:
-        st.warning("⚠️ Enter your Binance API keys manually (Not detected in Streamlit secrets).")
-        api_key = st.sidebar.text_input("🔑 Binance API Key", type="password")
-        api_secret = st.sidebar.text_input("🔒 Binance API Secret", type="password")
-    return api_key, api_secret
+# --- App Config ---
+st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")
+st.title("📈 Real-Time Breakout Signal Dashboard (No API Key)")
 
-api_key, api_secret = get_api_keys()
-
-# --- Initialize Binance Client ---
-if api_key and api_secret:
-    try:
-        client = Client(api_key, api_secret)
-        client.get_account()  # Test call
-        st.success(f"✅ Connected to Binance!")
-    except BinanceAPIException as e:
-        st.error(f"❌ Binance API Error: {e.message}")
-        st.stop()
-else:
-    st.info("Please enter your Binance API keys to proceed.")
-    st.stop()
-
-# --- Sidebar Settings ---
-st.sidebar.header("⚙️ Settings")
-symbol = st.sidebar.selectbox("Select Symbol", ["BTCUSDT", "ETHUSDT", "BNBUSDT"])
+# --- Sidebar Options ---
+symbol = st.sidebar.selectbox("Select Symbol", [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "LINKUSDT"
+])
 interval = st.sidebar.selectbox("Candle Interval", ["1m", "5m", "15m", "1h", "4h", "1d"])
 limit = st.sidebar.slider("Candles to Fetch", 100, 1000, 500)
 
@@ -50,29 +29,28 @@ sr_length = st.sidebar.number_input("S/R Detection Length", 5, 50, 15)
 sr_margin = st.sidebar.number_input("S/R Margin", 1.0, 5.0, 2.0)
 indicator_length = st.sidebar.slider("Indicator Length", 10, 50, 17)
 
-# --- Binance OHLC Fetch ---
+# --- Binance Public API Fetch ---
 @st.cache_data(ttl=60)
 def get_binance_ohlc(symbol, interval, limit):
-    try:
-        klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        df = pd.DataFrame(klines, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-        ])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-        return df
-    except BinanceAPIException as e:
-        st.error(f"Binance error: {e}")
-        return pd.DataFrame()
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    response = requests.get(url, params=params)
+    data = response.json()
+    df = pd.DataFrame(data, columns=[
+        'timestamp', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_asset_volume', 'number_of_trades',
+        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+    ])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+    df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+    return df
 
 df = get_binance_ohlc(symbol, interval, limit)
 
 # --- Indicators ---
 adj_len = sr_length
-df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=indicator_length)
+df['ATR'] = df.ta.atr(length=indicator_length)
 df['vol_sma'] = df['volume'].rolling(indicator_length).mean()
 
 # --- Pivot Zones ---
@@ -101,17 +79,16 @@ for zone in resistance_zones:
 for zone in support_zones:
     df.loc[df.index >= zone['index'], 'support'] = zone['bottom']
 
-# --- Breakout Signal Logic ---
+# --- Signal Logic ---
 df['bull_breakout'] = (df['close'] > df['resistance'].shift(1)) & (df['close'].shift(1) <= df['resistance'].shift(1))
 df['bear_breakout'] = (df['close'] < df['support'].shift(1)) & (df['close'].shift(1) >= df['support'].shift(1))
 
-df['signal'] = np.where(df['bull_breakout'], 'Buy', np.where(df['bear_breakout'], 'Sell', None))
-
-# --- Cooldown Filter (5 candle gap) ---
+# --- Cooldown ---
 cooldown = 5
-last_signal_idx = -cooldown
+df['signal'] = np.where(df['bull_breakout'], 'Buy', np.where(df['bear_breakout'], 'Sell', None))
+last_signal_idx = -cooldown * 2
 for i in range(len(df)):
-    if df['signal'].iloc[i] is not None:
+    if df['signal'].iloc[i]:
         if i - last_signal_idx < cooldown:
             df.at[df.index[i], 'signal'] = None
         else:
@@ -119,16 +96,16 @@ for i in range(len(df)):
 
 # --- Latest Signal ---
 latest = df.iloc[-1]
-signal_msg = "🟡 No Signal"
+signal = "🟡 No Signal"
 if latest['signal'] == 'Buy':
-    signal_msg = f"📈 Buy Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
+    signal = f"📈 Buy Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.4f}"
 elif latest['signal'] == 'Sell':
-    signal_msg = f"📉 Sell Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
+    signal = f"📉 Sell Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.4f}"
 
 st.subheader("🧠 Latest Signal:")
-st.info(signal_msg)
+st.info(signal)
 
-# --- Plot Chart ---
+# --- Chart ---
 fig = go.Figure()
 fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
                              low=df['low'], close=df['close'], name='Candles'))
@@ -144,10 +121,9 @@ signals_df.columns = ['Price', 'Resistance', 'Support', 'Type']
 st.subheader("📋 Breakout Signal Log")
 st.dataframe(signals_df.tail(20))
 
-# --- Download Button ---
 st.download_button("⬇️ Download Signal Log", signals_df.to_csv().encode('utf-8'), "signal_log.csv", "text/csv")
 
-# --- Simple Backtest ---
+# --- Backtest ---
 def backtest_signals(data, tp_pct, sl_pct, lookahead=5):
     wins = 0
     losses = 0

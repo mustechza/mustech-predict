@@ -1,3 +1,5 @@
 streamlit
 pandas
 python-binance
+TA-Lib
+matplotlib

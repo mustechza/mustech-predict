@@ -4,3 +4,4 @@ numpy==1.24.4
 pandas_ta==0.3.14b0
 python-binance==1.0.17
 plotly==5.21.0
+mplfinance

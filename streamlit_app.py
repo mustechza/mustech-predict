@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pandas_ta as ta
-import datetime
 import requests
 import plotly.graph_objects as go
 
 # --- App Config ---
-st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")
+st.set_page_config(page_title="Binance Breakout Trading Dashboard", layout="wide")
 st.title("📈 Real-Time Breakout Signal Dashboard")
 
 # Sidebar Inputs
@@ -38,15 +37,23 @@ def get_binance_ohlc(symbol, interval, limit):
             'close_time', 'quote_asset_volume', 'number_of_trades',
             'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
         ])
+        
+        # Ensure columns are in the correct format
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
-        df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+
+        # Convert columns to float for technical indicator calculations
+        df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+
+        # Check the first few rows to ensure data is processed correctly
+        st.write(df.head())
+
         return df
     else:
         st.error("Failed to fetch data from Binance.")
         return pd.DataFrame()
 
-# Fetch the data
+# Fetch Data
 df = get_binance_ohlc(symbol, interval, limit)
 
 # --- Indicators ---
@@ -148,3 +155,4 @@ if total > 0:
     st.metric("Losses", f"{losses}")
 else:
     st.info("Not enough signals for backtest.")
+    

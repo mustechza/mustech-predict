@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
 import pandas_ta as ta
-import datetime
-from datetime import datetime
+import numpy as np
 
 # --- API Key (Hardcoded for now) ---
-ALPHA_VANTAGE_API_KEY = "4VRCXGZ2KAY4NTXX"
+ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_api_key_here"
 
 # --- App Config ---
 st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")
@@ -29,7 +27,7 @@ def fetch_alpha_vantage_data(symbol, interval, api_key, limit=500):
         url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={interval}&apikey={api_key}'
         response = requests.get(url)
         data = response.json()
-        
+
         if 'Time Series' in data:
             timeseries_key = f"Time Series ({interval})"
             df = pd.DataFrame.from_dict(data[timeseries_key], orient='index')
@@ -46,6 +44,13 @@ def fetch_alpha_vantage_data(symbol, interval, api_key, limit=500):
 
 # Fetch data for selected symbol and interval
 df = fetch_alpha_vantage_data(symbol, interval, ALPHA_VANTAGE_API_KEY, limit)
+
+# Ensure columns are numeric
+df['open'] = pd.to_numeric(df['open'], errors='coerce')
+df['high'] = pd.to_numeric(df['high'], errors='coerce')
+df['low'] = pd.to_numeric(df['low'], errors='coerce')
+df['close'] = pd.to_numeric(df['close'], errors='coerce')
+df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
 
 # --- Indicators ---
 df['ATR'] = df.ta.atr(length=indicator_length)
@@ -140,9 +145,9 @@ def backtest_signals(data, tp_pct, sl_pct, lookahead=5):
         total += 1
     return wins, losses, total
 
-wins, losses, total = backtest_signals(signals_df, TP_PCT, SL_PCT)
-if total > 0:
-    st.metric("Backtest Win Rate", f"{(wins/total)*100:.2f}% ({wins}/{total})")
-    st.metric("Losses", f"{losses}")
-else:
-    st.info("Not enough signals for backtest.")
+backtest_results = backtest_signals(signals_df, TP_PCT, SL_PCT)
+st.subheader("📊 Backtest Results")
+st.write(f"Total Trades: {backtest_results[2]}")
+st.write(f"Wins: {backtest_results[0]} ({(backtest_results[0]/backtest_results[2])*100:.2f}%)")
+st.write(f"Losses: {backtest_results[1]} ({(backtest_results[1]/backtest_results[2])*100:.2f}%)")
+               

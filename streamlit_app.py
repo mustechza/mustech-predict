@@ -1,89 +1,87 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
-import mplfinance as mpf
+import plotly.graph_objects as go
+
+# --- API Key from Streamlit Secrets ---
+ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
 
 # --- App Config ---
-st.set_page_config(page_title="Binance Breakout Trading Dashboard", layout="wide")
+st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")
 st.title("📈 Real-Time Breakout Signal Dashboard")
 
-# Sidebar Inputs
-market = st.sidebar.selectbox("Select Market", ["BTCUSDT", "ETHUSDT", "BNBUSDT"])
-tick_interval = st.sidebar.selectbox("Select Interval", ["1m", "5m", "15m", "1h", "4h", "1d"])
+# --- Sidebar Configuration ---
+symbol = st.sidebar.selectbox("Select Symbol", ["AAPL", "GOOGL", "AMZN", "MSFT", "TSLA"])
+interval = st.sidebar.selectbox("Candle Interval", ["1min", "5min", "15min", "1h", "4h", "1d"])
 limit = st.sidebar.slider("Candles to Fetch", 100, 1000, 500)
 
 TP_PCT = st.sidebar.number_input("Take Profit (%)", 0.1, 10.0, 2.0) / 100
 SL_PCT = st.sidebar.number_input("Stop Loss (%)", 0.1, 10.0, 1.0) / 100
-indicator_length = st.sidebar.slider("Indicator Length", 10, 50, 17)
 
-# --- Function to fetch historical candlestick data from Binance ---
-def get_binance_ohlc(market, tick_interval, limit):
-    url = f'https://api.binance.com/api/v3/klines?symbol={market}&interval={tick_interval}&limit={limit}'
+# --- Fetch Data from Alpha Vantage API ---
+def get_alpha_vantage_data(symbol, interval, limit):
     try:
-        response = requests.get(url)
+        url = f'https://www.alphavantage.co/query'
+        params = {
+            'function': 'TIME_SERIES_INTRADAY',
+            'symbol': symbol,
+            'interval': interval,
+            'apikey': ALPHA_VANTAGE_API_KEY,
+            'outputsize': 'full'  # 'compact' for 100 data points, 'full' for max (over 2000 data points)
+        }
+        response = requests.get(url, params=params)
+        data = response.json()
         
-        # Check if the request was successful
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                df = pd.DataFrame(data, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'close_time', 'quote_asset_volume', 'number_of_trades',
-                    'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-                ])
-                
-                # Ensure columns are in the correct format
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                df.set_index('timestamp', inplace=True)
-
-                # Convert columns to float for technical indicator calculations
-                df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-
-                return df
-            else:
-                st.error(f"No data returned for {market} with interval {tick_interval}")
-                return pd.DataFrame()
+        # Check if the data retrieval is successful
+        if "Time Series" in data:
+            time_series_key = f"Time Series ({interval})"
+            df = pd.DataFrame(data[time_series_key]).T
+            df.columns = ['open', 'high', 'low', 'close', 'volume']
+            df.index = pd.to_datetime(df.index)
+            df = df.astype(float)
+            return df.head(limit)
         else:
-            st.error(f"Failed to fetch data from Binance. Status Code: {response.status_code}")
+            st.error(f"Failed to fetch data for {symbol}.")
             return pd.DataFrame()
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+        st.error(f"Error fetching data from Alpha Vantage: {e}")
         return pd.DataFrame()
 
-# --- Fetch Data ---
-df = get_binance_ohlc(market, tick_interval, limit)
+# Fetch the data
+df = get_alpha_vantage_data(symbol, interval, limit)
 
-# --- Display Data for Debugging ---
-if not df.empty:
-    st.write(df.head())
-else:
-    st.write("No data to display.")
+# --- Calculate ATR and Signal Logic ---
+indicator_length = 14
+df['ATR'] = df['high'].rolling(indicator_length).mean() - df['low'].rolling(indicator_length).mean()  # Simplified ATR
 
-# --- Display Candlestick Chart ---
-if not df.empty:
-    st.subheader(f"Candlestick Chart for {market} - {tick_interval} interval")
-    mpf.plot(df, type='candle', style='charles', title=f"{market} - {tick_interval} Chart", ylabel='Price', volume=True)
+# --- Signal Logic ---
+df['bull_breakout'] = (df['close'] > df['close'].shift(1)) & (df['close'].shift(1) <= df['close'].shift(1))
+df['bear_breakout'] = (df['close'] < df['close'].shift(1)) & (df['close'].shift(1) >= df['close'].shift(1))
 
-# --- Technical Indicators ---
-if not df.empty:
-    # Add your technical indicator logic here, e.g., ATR, RSI, MACD, etc.
-    # For example, let's calculate the ATR (Average True Range)
-    df['ATR'] = df.ta.atr(length=indicator_length)
+# --- Latest Signal ---
+latest = df.iloc[-1]
+signal = "🟡 No Signal"
+if latest['bull_breakout']:
+    signal = f"📈 Buy Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
+elif latest['bear_breakout']:
+    signal = f"📉 Sell Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
 
-    st.subheader(f"Average True Range (ATR) for {market} - {tick_interval} interval")
-    st.write(df[['ATR']].tail())
+st.subheader("🧠 Latest Signal:")
+st.info(signal)
 
-    # Additional logic for other indicators can be added similarly
+# --- Plot Chart ---
+fig = go.Figure()
+fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
+                             low=df['low'], close=df['close'], name='Candles'))
+st.plotly_chart(fig, use_container_width=True)
 
-# --- Display Breakout Signals or Alerts ---
-# You can implement your breakout signal logic here, using the fetched data and technical indicators
-# Example:
-if not df.empty:
-    st.subheader(f"Breakout Signals for {market} - {tick_interval} interval")
+# --- Signal Table & Download ---
+signals_df = df[df['bull_breakout'] | df['bear_breakout']].copy()
+signals_df['Type'] = signals_df.apply(lambda row: 'Buy' if row['bull_breakout'] else 'Sell' if row['bear_breakout'] else None, axis=1)
+signals_df = signals_df[['close', 'Type']]
+signals_df.columns = ['Price', 'Type']
+st.subheader("📋 Breakout Signal Log")
+st.dataframe(signals_df.tail(20))
+st.download_button("⬇️ Download Signal Log", signals_df.to_csv().encode('utf-8'), "signal_log.csv", "text/csv")
 
-    # Placeholder for signal generation logic
-    # For example, you might detect a breakout using a certain threshold for the ATR or other indicators
-    breakout_signal = "Signal Placeholder"  # Replace with actual signal logic
-
-    st.write(f"Signal: {breakout_signal}")
-    

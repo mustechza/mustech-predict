@@ -1,153 +1,161 @@
-import streamlit as st
+# ✅ Install required packages (first time only):
+# !pip install ipywidgets matplotlib pandas numpy TA-Lib
+
+import io
 import pandas as pd
-import requests
-import pandas_ta as ta
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import ipywidgets as widgets
+from IPython.display import display
+import talib as ta
 
-# --- API Key (Hardcoded for now) ---
-ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_api_key_here"
+# --- Configurable Parameters ---
+sr_length = 15
+sr_margin = 2
+atr_period = 17
+volume_sma_period = 17
+TP_PCT = 0.02
+SL_PCT = 0.01
+DAYS_TO_PLOT = 30
+tf_scale = 1  # set to 15, 60, etc., if using MTF
 
-# --- App Config ---
-st.set_page_config(page_title="Breakout Signal Dashboard", layout="wide")
-st.title("📈 Real-Time Breakout Signal Dashboard")
+# --- Main Backtest Function ---
+def run_backtest(df):
+    df = df.copy()
+    df.set_index('timestamp', inplace=True)
+    
+    adj_len = int(sr_length * tf_scale)
+    df['ATR'] = ta.ATR(df['high'], df['low'], df['close'], timeperiod=atr_period)
+    df['vol_sma'] = df['volume'].rolling(volume_sma_period).mean()
+    
+    df['pivothigh'] = df['high'][(df['high'].shift(adj_len) < df['high']) & (df['high'].shift(-adj_len) < df['high'])]
+    df['pivotlow'] = df['low'][(df['low'].shift(adj_len) < df['low']) & (df['low'].shift(-adj_len) < df['low'])]
+    
+    zone_range = (df['high'].max() - df['low'].min()) / df['high'].max()
+    resistance_zones = []
+    support_zones = []
 
-symbol = st.sidebar.selectbox("Select Symbol", ["BTCUSD", "ETHUSD", "AAPL", "GOOG"])
-interval = st.sidebar.selectbox("Candle Interval", ["1min", "5min", "15min", "1h", "4h", "1d"])
-limit = st.sidebar.slider("Candles to Fetch", 100, 1000, 500)
+    for i in range(adj_len, len(df) - adj_len):
+        idx = df.index[i]
+        row = df.iloc[i]
+        if not np.isnan(row['pivothigh']):
+            top = row['pivothigh']
+            bottom = top * (1 - sr_margin * 0.17 * zone_range)
+            resistance_zones.append({'index': idx, 'top': top, 'bottom': bottom})
+        if not np.isnan(row['pivotlow']):
+            bottom = row['pivotlow']
+            top = bottom * (1 + sr_margin * 0.17 * zone_range)
+            support_zones.append({'index': idx, 'top': top, 'bottom': bottom})
 
-TP_PCT = st.sidebar.number_input("Take Profit (%)", 0.1, 10.0, 2.0) / 100
-SL_PCT = st.sidebar.number_input("Stop Loss (%)", 0.1, 10.0, 1.0) / 100
-sr_length = st.sidebar.number_input("S/R Detection Length", 5, 50, 15)
-sr_margin = st.sidebar.number_input("S/R Margin", 1.0, 5.0, 2.0)
-indicator_length = st.sidebar.slider("Indicator Length", 10, 50, 17)
+    df['resistance'] = np.nan
+    df['support'] = np.nan
+    for zone in resistance_zones:
+        df.loc[df.index >= zone['index'], 'resistance'] = zone['top']
+    for zone in support_zones:
+        df.loc[df.index >= zone['index'], 'support'] = zone['bottom']
 
-# --- Fetch Data from Alpha Vantage ---
-def fetch_alpha_vantage_data(symbol, interval, api_key, limit=500):
-    try:
-        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={interval}&apikey={api_key}'
-        response = requests.get(url)
-        data = response.json()
+    df['bull_breakout'] = (df['close'] > df['resistance'].shift(1)) & (df['close'].shift(1) <= df['resistance'].shift(1))
+    df['bear_breakout'] = (df['close'] < df['support'].shift(1)) & (df['close'].shift(1) >= df['support'].shift(1))
+    df['vol_tag'] = np.where(df['volume'] > 4.669 * df['vol_sma'], 'V-Spike',
+                      np.where(df['volume'] > 1.618 * df['vol_sma'], 'High',
+                      np.where(df['volume'] < 0.618 * df['vol_sma'], 'Low', 'Avg')))
 
-        if 'Time Series' in data:
-            timeseries_key = f"Time Series ({interval})"
-            df = pd.DataFrame.from_dict(data[timeseries_key], orient='index')
-            df.columns = ['open', 'high', 'low', 'close', 'volume']
-            df = df.astype(float)
-            df.index = pd.to_datetime(df.index)
-            return df.tail(limit)
-        else:
-            st.error("Failed to fetch data. Check the API key or symbol.")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
+    # --- Trade Tracking ---
+    trades = []
+    position = None
 
-# Fetch data for selected symbol and interval
-df = fetch_alpha_vantage_data(symbol, interval, ALPHA_VANTAGE_API_KEY, limit)
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        if position:
+            price = row['close']
+            entry = position['entry_price']
+            if position['type'] == 'long':
+                if price >= entry * (1 + TP_PCT):
+                    trades.append({**position, 'exit_time': row.name, 'exit_price': price, 'pnl': TP_PCT})
+                    position = None
+                elif price <= entry * (1 - SL_PCT):
+                    trades.append({**position, 'exit_time': row.name, 'exit_price': price, 'pnl': -SL_PCT})
+                    position = None
+            else:
+                if price <= entry * (1 - TP_PCT):
+                    trades.append({**position, 'exit_time': row.name, 'exit_price': price, 'pnl': TP_PCT})
+                    position = None
+                elif price >= entry * (1 + SL_PCT):
+                    trades.append({**position, 'exit_time': row.name, 'exit_price': price, 'pnl': -SL_PCT})
+                    position = None
+        if position is None:
+            if row['bull_breakout']:
+                position = {'type': 'long', 'entry_price': row['close'], 'entry_time': row.name}
+            elif row['bear_breakout']:
+                position = {'type': 'short', 'entry_price': row['close'], 'entry_time': row.name}
 
-# Ensure columns are numeric
-df['open'] = pd.to_numeric(df['open'], errors='coerce')
-df['high'] = pd.to_numeric(df['high'], errors='coerce')
-df['low'] = pd.to_numeric(df['low'], errors='coerce')
-df['close'] = pd.to_numeric(df['close'], errors='coerce')
-df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+    # --- Backtest Summary ---
+    results = pd.DataFrame(trades)
+    if not results.empty:
+        results['duration'] = (results['exit_time'] - results['entry_time']).dt.total_seconds() / 60  # in minutes
+        total_trades = len(results)
+        wins = results[results['pnl'] > 0]
+        losses = results[results['pnl'] < 0]
+        win_rate = len(wins) / total_trades * 100
+        avg_pnl = results['pnl'].mean()
+        total_pnl = results['pnl'].sum()
+        profit_factor = wins['pnl'].sum() / abs(losses['pnl'].sum()) if not losses.empty else np.inf
 
-# --- Indicators ---
-df['ATR'] = df.ta.atr(length=indicator_length)
-df['vol_sma'] = df['volume'].rolling(indicator_length).mean()
+        print("\n🔍 Backtest Summary:")
+        print(f"Total Trades      : {total_trades}")
+        print(f"Win Rate          : {win_rate:.2f}%")
+        print(f"Average PnL/trade : {avg_pnl:.4f}")
+        print(f"Cumulative PnL    : {total_pnl:.4f}")
+        print(f"Profit Factor     : {profit_factor:.2f}")
 
-# --- Pivot Zones ---
-df['pivothigh'] = df['high'][(df['high'].shift(sr_length) < df['high']) & (df['high'].shift(-sr_length) < df['high'])]
-df['pivotlow'] = df['low'][(df['low'].shift(sr_length) < df['low']) & (df['low'].shift(-sr_length) < df['low'])]
+        results.to_csv("backtest_trades.csv", index=False)
+        print("✅ Trades exported to 'backtest_trades.csv'")
+    else:
+        print("No trades generated.")
 
-zone_range = (df['high'].max() - df['low'].min()) / df['high'].max()
-resistance_zones, support_zones = [], []
+    # --- Plotting ---
+    df_plot = df.last(f'{DAYS_TO_PLOT}D')
+    entry_points = [t for t in trades if t['entry_time'] in df_plot.index and t['exit_time'] in df_plot.index]
 
-for i in range(sr_length, len(df) - sr_length):
-    idx = df.index[i]
-    row = df.iloc[i]
-    if not np.isnan(row['pivothigh']):
-        top = row['pivothigh']
-        bottom = top * (1 - sr_margin * 0.17 * zone_range)
-        resistance_zones.append({'index': idx, 'top': top, 'bottom': bottom})
-    if not np.isnan(row['pivotlow']):
-        bottom = row['pivotlow']
-        top = bottom * (1 + sr_margin * 0.17 * zone_range)
-        support_zones.append({'index': idx, 'top': top, 'bottom': bottom})
+    fig, ax = plt.subplots(figsize=(14, 8))
+    width = 0.6
+    colors = ['green' if c >= o else 'red' for o, c in zip(df_plot['open'], df_plot['close'])]
+    dates = mdates.date2num(df_plot.index.to_pydatetime())
 
-df['resistance'] = np.nan
-df['support'] = np.nan
-for zone in resistance_zones:
-    df.loc[df.index >= zone['index'], 'resistance'] = zone['top']
-for zone in support_zones:
-    df.loc[df.index >= zone['index'], 'support'] = zone['bottom']
+    for i in range(len(df_plot)):
+        ax.plot([dates[i], dates[i]], [df_plot['low'].iloc[i], df_plot['high'].iloc[i]], color='black')
+        ax.bar(dates[i], df_plot['close'].iloc[i] - df_plot['open'].iloc[i], bottom=df_plot['open'].iloc[i],
+               width=width, color=colors[i], edgecolor='black')
 
-# --- Signal Logic ---
-df['bull_breakout'] = (df['close'] > df['resistance'].shift(1)) & (df['close'].shift(1) <= df['resistance'].shift(1))
-df['bear_breakout'] = (df['close'] < df['support'].shift(1)) & (df['close'].shift(1) >= df['support'].shift(1))
+    ax.plot(dates, df_plot['resistance'], label='Resistance', color='red', linestyle='--', alpha=0.6)
+    ax.plot(dates, df_plot['support'], label='Support', color='green', linestyle='--', alpha=0.6)
 
-# --- Redundant Signal Filter (Cooldown of 5 candles) ---
-cooldown = 5
-df['signal'] = np.where(df['bull_breakout'], 'Buy', np.where(df['bear_breakout'], 'Sell', None))
-for i in range(1, len(df)):
-    if df['signal'].iloc[i] == df['signal'].iloc[i - 1] and df['signal'].iloc[i] is not None:
-        if i - df['signal'].last_valid_index() < cooldown:
-            df.at[df.index[i], 'signal'] = None
+    for t in entry_points:
+        entry_idx = df_plot.index.get_loc(t['entry_time'])
+        exit_idx = df_plot.index.get_loc(t['exit_time'])
+        ax.scatter(dates[entry_idx], t['entry_price'], color='blue' if t['type'] == 'long' else 'orange', marker='^')
+        ax.scatter(dates[exit_idx], t['exit_price'], color='blue' if t['type'] == 'long' else 'orange', marker='v')
 
-# --- Latest Signal ---
-latest = df.iloc[-1]
-signal = "🟡 No Signal"
-if latest['signal'] == 'Buy':
-    signal = f"📈 Buy Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
-elif latest['signal'] == 'Sell':
-    signal = f"📉 Sell Signal ({symbol}) at {latest.name.strftime('%H:%M:%S')} - Price: {latest['close']:.2f}"
+    ax.set_title(f'Trade Plot (Last {DAYS_TO_PLOT} Days)')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Price')
+    ax.legend(loc='upper left')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
 
-st.subheader("🧠 Latest Signal:")
-st.info(signal)
+# --- Upload Widget ---
+upload_btn = widgets.FileUpload(accept='.csv', multiple=False)
+display(upload_btn)
 
-# --- Chart ---
-import plotly.graph_objects as go
-fig = go.Figure()
-fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
-                             low=df['low'], close=df['close'], name='Candles'))
-fig.add_trace(go.Scatter(x=df.index, y=df['resistance'], mode='lines', name='Resistance', line=dict(color='red')))
-fig.add_trace(go.Scatter(x=df.index, y=df['support'], mode='lines', name='Support', line=dict(color='green')))
-st.plotly_chart(fig, use_container_width=True)
+def handle_upload(change):
+    if upload_btn.value:
+        file_data = next(iter(upload_btn.value.values()))
+        content = file_data['content']
+        df = pd.read_csv(io.BytesIO(content), parse_dates=['timestamp'])
+        print(f"✅ File '{file_data['metadata']['name']}' uploaded. Starting backtest...")
+        run_backtest(df)
 
-# --- Signal Table & Download ---
-signals_df = df[df['signal'].notna()].copy()
-signals_df['Type'] = signals_df['signal']
-signals_df = signals_df[['close', 'resistance', 'support', 'Type']]
-signals_df.columns = ['Price', 'Resistance', 'Support', 'Type']
-st.subheader("📋 Breakout Signal Log")
-st.dataframe(signals_df.tail(20))
-st.download_button("⬇️ Download Signal Log", signals_df.to_csv().encode('utf-8'), "signal_log.csv", "text/csv")
-
-# --- Simple Backtest ---
-def backtest_signals(data, tp_pct, sl_pct, lookahead=5):
-    wins = 0
-    losses = 0
-    total = 0
-    for i, row in data.iterrows():
-        entry_price = row['Price']
-        end_idx = df.index.get_loc(i) + lookahead
-        if end_idx >= len(df):
-            continue
-        future_prices = df.iloc[df.index.get_loc(i):end_idx]['close']
-        tp_price = entry_price * (1 + tp_pct) if row['Type'] == 'Buy' else entry_price * (1 - tp_pct)
-        sl_price = entry_price * (1 - sl_pct) if row['Type'] == 'Buy' else entry_price * (1 + sl_pct)
-        hit_tp = (future_prices >= tp_price).any() if row['Type'] == 'Buy' else (future_prices <= tp_price).any()
-        hit_sl = (future_prices <= sl_price).any() if row['Type'] == 'Buy' else (future_prices >= sl_price).any()
-        if hit_tp:
-            wins += 1
-        elif hit_sl:
-            losses += 1
-        total += 1
-    return wins, losses, total
-
-backtest_results = backtest_signals(signals_df, TP_PCT, SL_PCT)
-st.subheader("📊 Backtest Results")
-st.write(f"Total Trades: {backtest_results[2]}")
-st.write(f"Wins: {backtest_results[0]} ({(backtest_results[0]/backtest_results[2])*100:.2f}%)")
-st.write(f"Losses: {backtest_results[1]} ({(backtest_results[1]/backtest_results[2])*100:.2f}%)")
-               
+upload_btn.observe(handle_upload, names='value')

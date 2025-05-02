@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import talib as ta
 
 # --- Settings ---
 sr_length = 15
@@ -13,19 +12,27 @@ volume_sma_period = 17
 TP_PCT = 0.02
 SL_PCT = 0.01
 DAYS_TO_PLOT = 30
-tf_scale = 1  # Use 15, 60, etc., for MTF logic
+tf_scale = 1  # for MTF if needed
 
 st.set_page_config(layout="wide")
-st.title("📉 LuxAlgo-Style Support/Resistance Backtest")
+st.title("📉 Support/Resistance Backtest (No TA-Lib)")
 
-uploaded_file = st.file_uploader("Upload your OHLCV CSV", type="csv")
+uploaded_file = st.file_uploader("Upload OHLCV CSV", type="csv")
+
+def calculate_atr(df, period):
+    tr = pd.DataFrame(index=df.index)
+    tr['hl'] = df['high'] - df['low']
+    tr['hc'] = np.abs(df['high'] - df['close'].shift(1))
+    tr['lc'] = np.abs(df['low'] - df['close'].shift(1))
+    df['ATR'] = tr.max(axis=1).rolling(window=period).mean()
+    return df
 
 def run_backtest(df):
     df = df.copy()
     df.set_index('timestamp', inplace=True)
 
     adj_len = int(sr_length * tf_scale)
-    df['ATR'] = ta.ATR(df['high'], df['low'], df['close'], timeperiod=atr_period)
+    df = calculate_atr(df, atr_period)
     df['vol_sma'] = df['volume'].rolling(volume_sma_period).mean()
 
     df['pivothigh'] = df['high'][(df['high'].shift(adj_len) < df['high']) & (df['high'].shift(-adj_len) < df['high'])]
@@ -56,7 +63,7 @@ def run_backtest(df):
     df['bull_breakout'] = (df['close'] > df['resistance'].shift(1)) & (df['close'].shift(1) <= df['resistance'].shift(1))
     df['bear_breakout'] = (df['close'] < df['support'].shift(1)) & (df['close'].shift(1) >= df['support'].shift(1))
 
-    # --- Trade Tracking ---
+    # --- Trade Logic ---
     trades = []
     position = None
     for i in range(1, len(df)):
@@ -84,7 +91,7 @@ def run_backtest(df):
             elif row['bear_breakout']:
                 position = {'type': 'short', 'entry_price': row['close'], 'entry_time': row.name}
 
-    # --- Plotting ---
+    # --- Chart ---
     st.subheader("📊 Price Chart with Trades")
     df_plot = df.last(f'{DAYS_TO_PLOT}D')
     entry_points = [t for t in trades if t['entry_time'] in df_plot.index and t['exit_time'] in df_plot.index]
@@ -111,15 +118,14 @@ def run_backtest(df):
     ax.set_title(f'Trades (Last {DAYS_TO_PLOT} Days)')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     ax.legend(loc='upper left')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
-    # --- Summary Stats ---
-    results = pd.DataFrame(trades)
+    # --- Backtest Summary ---
     st.subheader("📈 Backtest Summary")
-
+    results = pd.DataFrame(trades)
     if not results.empty:
         results['duration_min'] = (results['exit_time'] - results['entry_time']).dt.total_seconds() / 60
         total_trades = len(results)
@@ -135,12 +141,11 @@ def run_backtest(df):
         st.metric("Avg PnL per Trade", f"{avg_pnl:.4f}")
         st.metric("Cumulative PnL", f"{total_pnl:.4f}")
         st.metric("Profit Factor", f"{profit_factor:.2f}")
-
         st.download_button("📥 Download Trades CSV", data=results.to_csv(index=False), file_name="backtest_trades.csv")
     else:
         st.warning("No trades were generated.")
 
-# --- Upload trigger ---
+# --- Upload Trigger ---
 if uploaded_file:
     df = pd.read_csv(uploaded_file, parse_dates=['timestamp'])
     st.success("✅ File loaded. Running backtest...")

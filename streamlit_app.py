@@ -1,16 +1,11 @@
-# ✅ Install required packages (first time only):
-# !pip install ipywidgets matplotlib pandas numpy TA-Lib
-
-import io
+import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import ipywidgets as widgets
-from IPython.display import display
 import talib as ta
 
-# --- Configurable Parameters ---
+# --- Settings ---
 sr_length = 15
 sr_margin = 2
 atr_period = 17
@@ -18,23 +13,26 @@ volume_sma_period = 17
 TP_PCT = 0.02
 SL_PCT = 0.01
 DAYS_TO_PLOT = 30
-tf_scale = 1  # set to 15, 60, etc., if using MTF
+tf_scale = 1  # Use 15, 60, etc., for MTF logic
 
-# --- Main Backtest Function ---
+st.set_page_config(layout="wide")
+st.title("📉 LuxAlgo-Style Support/Resistance Backtest")
+
+uploaded_file = st.file_uploader("Upload your OHLCV CSV", type="csv")
+
 def run_backtest(df):
     df = df.copy()
     df.set_index('timestamp', inplace=True)
-    
+
     adj_len = int(sr_length * tf_scale)
     df['ATR'] = ta.ATR(df['high'], df['low'], df['close'], timeperiod=atr_period)
     df['vol_sma'] = df['volume'].rolling(volume_sma_period).mean()
-    
+
     df['pivothigh'] = df['high'][(df['high'].shift(adj_len) < df['high']) & (df['high'].shift(-adj_len) < df['high'])]
     df['pivotlow'] = df['low'][(df['low'].shift(adj_len) < df['low']) & (df['low'].shift(-adj_len) < df['low'])]
-    
+
     zone_range = (df['high'].max() - df['low'].min()) / df['high'].max()
-    resistance_zones = []
-    support_zones = []
+    resistance_zones, support_zones = [], []
 
     for i in range(adj_len, len(df) - adj_len):
         idx = df.index[i]
@@ -57,14 +55,10 @@ def run_backtest(df):
 
     df['bull_breakout'] = (df['close'] > df['resistance'].shift(1)) & (df['close'].shift(1) <= df['resistance'].shift(1))
     df['bear_breakout'] = (df['close'] < df['support'].shift(1)) & (df['close'].shift(1) >= df['support'].shift(1))
-    df['vol_tag'] = np.where(df['volume'] > 4.669 * df['vol_sma'], 'V-Spike',
-                      np.where(df['volume'] > 1.618 * df['vol_sma'], 'High',
-                      np.where(df['volume'] < 0.618 * df['vol_sma'], 'Low', 'Avg')))
 
     # --- Trade Tracking ---
     trades = []
     position = None
-
     for i in range(1, len(df)):
         row = df.iloc[i]
         if position:
@@ -90,38 +84,15 @@ def run_backtest(df):
             elif row['bear_breakout']:
                 position = {'type': 'short', 'entry_price': row['close'], 'entry_time': row.name}
 
-    # --- Backtest Summary ---
-    results = pd.DataFrame(trades)
-    if not results.empty:
-        results['duration'] = (results['exit_time'] - results['entry_time']).dt.total_seconds() / 60  # in minutes
-        total_trades = len(results)
-        wins = results[results['pnl'] > 0]
-        losses = results[results['pnl'] < 0]
-        win_rate = len(wins) / total_trades * 100
-        avg_pnl = results['pnl'].mean()
-        total_pnl = results['pnl'].sum()
-        profit_factor = wins['pnl'].sum() / abs(losses['pnl'].sum()) if not losses.empty else np.inf
-
-        print("\n🔍 Backtest Summary:")
-        print(f"Total Trades      : {total_trades}")
-        print(f"Win Rate          : {win_rate:.2f}%")
-        print(f"Average PnL/trade : {avg_pnl:.4f}")
-        print(f"Cumulative PnL    : {total_pnl:.4f}")
-        print(f"Profit Factor     : {profit_factor:.2f}")
-
-        results.to_csv("backtest_trades.csv", index=False)
-        print("✅ Trades exported to 'backtest_trades.csv'")
-    else:
-        print("No trades generated.")
-
     # --- Plotting ---
+    st.subheader("📊 Price Chart with Trades")
     df_plot = df.last(f'{DAYS_TO_PLOT}D')
     entry_points = [t for t in trades if t['entry_time'] in df_plot.index and t['exit_time'] in df_plot.index]
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(14, 6))
+    dates = mdates.date2num(df_plot.index.to_pydatetime())
     width = 0.6
     colors = ['green' if c >= o else 'red' for o, c in zip(df_plot['open'], df_plot['close'])]
-    dates = mdates.date2num(df_plot.index.to_pydatetime())
 
     for i in range(len(df_plot)):
         ax.plot([dates[i], dates[i]], [df_plot['low'].iloc[i], df_plot['high'].iloc[i]], color='black')
@@ -137,25 +108,40 @@ def run_backtest(df):
         ax.scatter(dates[entry_idx], t['entry_price'], color='blue' if t['type'] == 'long' else 'orange', marker='^')
         ax.scatter(dates[exit_idx], t['exit_price'], color='blue' if t['type'] == 'long' else 'orange', marker='v')
 
-    ax.set_title(f'Trade Plot (Last {DAYS_TO_PLOT} Days)')
+    ax.set_title(f'Trades (Last {DAYS_TO_PLOT} Days)')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     ax.legend(loc='upper left')
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
     plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
+    st.pyplot(fig)
 
-# --- Upload Widget ---
-upload_btn = widgets.FileUpload(accept='.csv', multiple=False)
-display(upload_btn)
+    # --- Summary Stats ---
+    results = pd.DataFrame(trades)
+    st.subheader("📈 Backtest Summary")
 
-def handle_upload(change):
-    if upload_btn.value:
-        file_data = next(iter(upload_btn.value.values()))
-        content = file_data['content']
-        df = pd.read_csv(io.BytesIO(content), parse_dates=['timestamp'])
-        print(f"✅ File '{file_data['metadata']['name']}' uploaded. Starting backtest...")
-        run_backtest(df)
+    if not results.empty:
+        results['duration_min'] = (results['exit_time'] - results['entry_time']).dt.total_seconds() / 60
+        total_trades = len(results)
+        wins = results[results['pnl'] > 0]
+        losses = results[results['pnl'] < 0]
+        win_rate = len(wins) / total_trades * 100
+        avg_pnl = results['pnl'].mean()
+        total_pnl = results['pnl'].sum()
+        profit_factor = wins['pnl'].sum() / abs(losses['pnl'].sum()) if not losses.empty else np.inf
 
-upload_btn.observe(handle_upload, names='value')
+        st.metric("Total Trades", total_trades)
+        st.metric("Win Rate", f"{win_rate:.2f}%")
+        st.metric("Avg PnL per Trade", f"{avg_pnl:.4f}")
+        st.metric("Cumulative PnL", f"{total_pnl:.4f}")
+        st.metric("Profit Factor", f"{profit_factor:.2f}")
+
+        st.download_button("📥 Download Trades CSV", data=results.to_csv(index=False), file_name="backtest_trades.csv")
+    else:
+        st.warning("No trades were generated.")
+
+# --- Upload trigger ---
+if uploaded_file:
+    df = pd.read_csv(uploaded_file, parse_dates=['timestamp'])
+    st.success("✅ File loaded. Running backtest...")
+    run_backtest(df)

@@ -4,35 +4,49 @@ import requests
 from bs4 import BeautifulSoup
 import streamlit as st
 
+st.title("UK49s Predictor 🎯")
+
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
-    url = 'https://www.uk49sresults.co.uk/'  # Example site
+    urls = [
+        'https://www.lottery.co.uk/49s/results',  # More stable source
+        'https://www.lottodraw.com/uk49s',
+    ]
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
     }
-    response = requests.get(url, headers=headers, timeout=10)
-    response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-    past_results = []
-    draws = soup.select('.results .draw')[:10]  # Get last 10 draws
+            past_results = []
+            # Attempt to extract numbers from .balls or .drawn or other known classes
+            draws = soup.select('.balls, .drawn')[:10]
 
-    for draw in draws:
-        numbers = draw.select_one('.winning').text.strip().split()
-        numbers = [int(n) for n in numbers if n.isdigit()]
-        if len(numbers) >= 6:
-            past_results.append(numbers[:6])
+            for draw in draws:
+                numbers = [int(n.text.strip()) for n in draw.select('li, span') if n.text.strip().isdigit()]
+                if len(numbers) >= 6:
+                    past_results.append(numbers[:6])
 
-    return past_results
+            if past_results:
+                return past_results
+
+        except Exception as e:
+            continue
+
+    raise Exception("All sources failed")
 
 
 # === Fetch results with error handling ===
 try:
     past_results = fetch_latest_results()
+    st.success("✅ Live results fetched successfully!")
 except Exception as e:
-    st.error(f"Failed to fetch results online: {e}")
-    # Fallback to static sample results
+    st.warning(f"⚠️ Failed to fetch live results. Using sample data.")
     past_results = [
         [5, 12, 23, 34, 45, 48],
         [1, 14, 22, 33, 39, 44],
@@ -52,8 +66,11 @@ number_counts = Counter(all_numbers)
 hot_numbers = [num for num, count in number_counts.most_common()]
 cold_numbers = [num for num, count in number_counts.most_common()][::-1]
 
-print("Hot Numbers:", hot_numbers[:6])
-print("Cold Numbers:", cold_numbers[:6])
+st.subheader("🔥 Hot Numbers")
+st.write(hot_numbers[:6])
+
+st.subheader("❄️ Cold Numbers")
+st.write(cold_numbers[:6])
 
 
 # === Generate prediction ===
@@ -84,7 +101,13 @@ def generate_prediction():
     return sorted(prediction)
 
 
-# === Generate 3 predictions ===
-print("\nPredicted Combinations:")
-for _ in range(3):
-    print(generate_prediction())
+# === Display predictions ===
+st.subheader("🎲 Predicted Combinations")
+
+cols = st.columns(3)
+
+for i in range(3):
+    prediction = generate_prediction()
+    with cols[i]:
+        st.markdown(f"### 🎯 Combo {i+1}")
+        st.write(prediction)

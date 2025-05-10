@@ -2,11 +2,17 @@ import random
 from collections import Counter
 import requests
 from bs4 import BeautifulSoup
+import streamlit as st
 
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
-    url = 'https://www.uk49sresults.co.uk/'  # Example site, update if needed
-    response = requests.get(url)
+    url = 'https://www.uk49sresults.co.uk/'  # Example site
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
+    }
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()
+
     soup = BeautifulSoup(response.text, 'html.parser')
 
     past_results = []
@@ -21,8 +27,22 @@ def fetch_latest_results():
     return past_results
 
 
-# === Fetch results ===
-past_results = fetch_latest_results()
+# === Fetch results with error handling ===
+try:
+    past_results = fetch_latest_results()
+except Exception as e:
+    st.error(f"Failed to fetch results online: {e}")
+    # Fallback to static sample results
+    past_results = [
+        [5, 12, 23, 34, 45, 48],
+        [1, 14, 22, 33, 39, 44],
+        [7, 9, 16, 29, 36, 40],
+        [3, 18, 21, 30, 42, 49],
+        [6, 13, 27, 31, 38, 47],
+        [2, 10, 20, 32, 41, 46],
+        [4, 11, 19, 28, 35, 43],
+        [8, 15, 17, 24, 25, 37],
+    ]
 
 # === Count frequency ===
 all_numbers = [num for draw in past_results for num in draw]

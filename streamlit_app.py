@@ -16,7 +16,7 @@ if st.button("🔄 Refresh Predictions"):
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
     urls = [
-        'https://www.national-lottery.com/49s',  # New stable source
+        'https://uk49s.net/',  # New stable source
     ]
 
     headers = {

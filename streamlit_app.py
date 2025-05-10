@@ -91,14 +91,6 @@ st.markdown(" ".join([f"<span style='font-size:28px;color:red;font-weight:bold'>
 st.markdown("<h2 style='color:blue;'>❄️ Cold Numbers</h2>", unsafe_allow_html=True)
 st.markdown(" ".join([f"<span style='font-size:28px;color:blue;font-weight:bold'>{n}</span>" for n in cold_numbers[:6]]), unsafe_allow_html=True)
 
-# === Frequency Chart ===
-st.markdown("<h2 style='color:purple;'>📊 Number Frequency (Last 10 Draws)</h2>", unsafe_allow_html=True)
-fig, ax = plt.subplots()
-ax.bar(number_counts.keys(), number_counts.values(), color='purple')
-ax.set_xlabel('Number')
-ax.set_ylabel('Frequency')
-st.pyplot(fig)
-
 # === Generate prediction ===
 def generate_prediction(seed_offset):
     random.seed(seed_offset)
@@ -159,3 +151,11 @@ with cols[1]:
             st.markdown(f"<h4 style='color:purple;'>Combo {i+1}</h4>", unsafe_allow_html=True)
             st.markdown(colored_pred, unsafe_allow_html=True)
             st.markdown(f"<p style='color:green;font-size:18px;'>Matches: {match_count} 🎯 — Confidence: {confidence}%</p>", unsafe_allow_html=True)
+
+# === Number Frequency at the Bottom ===
+st.markdown("<h2 style='color:purple;'>📊 Number Frequency (Last 10 Draws)</h2>", unsafe_allow_html=True)
+fig, ax = plt.subplots()
+ax.bar(number_counts.keys(), number_counts.values(), color='purple')
+ax.set_xlabel('Number')
+ax.set_ylabel('Frequency')
+st.pyplot(fig)

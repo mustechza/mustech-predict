@@ -131,3 +131,4 @@ for i in range(3):
         st.markdown(f"### 🎯 Combo {i+1}")
         colored = " ".join([color_number(n) for n in prediction])
         st.markdown(colored, unsafe_allow_html=True)
+

@@ -6,6 +6,13 @@ import streamlit as st
 
 st.title("UK49s Predictor 🎯")
 
+# === Select draw type ===
+draw_type = st.radio("Select Draw:", ["Lunch Time", "Tea Time"])
+
+# === Refresh button ===
+if st.button("🔄 Refresh Predictions"):
+    st.experimental_rerun()
+
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
     urls = [
@@ -24,7 +31,6 @@ def fetch_latest_results():
             soup = BeautifulSoup(response.text, 'html.parser')
 
             past_results = []
-            # Attempt to extract numbers from .balls or .drawn or other known classes
             draws = soup.select('.balls, .drawn')[:10]
 
             for draw in draws:
@@ -58,11 +64,11 @@ except Exception as e:
         [8, 15, 17, 24, 25, 37],
     ]
 
+
 # === Count frequency ===
 all_numbers = [num for draw in past_results for num in draw]
 number_counts = Counter(all_numbers)
 
-# Sort numbers by frequency
 hot_numbers = [num for num, count in number_counts.most_common()]
 cold_numbers = [num for num, count in number_counts.most_common()][::-1]
 
@@ -74,16 +80,13 @@ st.write(cold_numbers[:6])
 
 
 # === Generate prediction ===
-def generate_prediction():
+def generate_prediction(seed_offset):
+    random.seed(seed_offset)
     prediction = set()
 
-    # Step 1: Pick 2 hot numbers
     prediction.update(random.sample(hot_numbers[:15], 2))
-
-    # Step 2: Pick 2 cold numbers
     prediction.update(random.sample(cold_numbers[:20], 2))
 
-    # Step 3: Fill the rest (ensuring odd/even balance and high/low balance)
     while len(prediction) < 6:
         candidate = random.randint(1, 49)
 
@@ -94,7 +97,6 @@ def generate_prediction():
         low_count = sum(1 for n in temp if n <= 24)
         high_count = sum(1 for n in temp if n >= 25)
 
-        # Keep balance 2-4 or 3-3 (odd-even and high-low)
         if odd_count <= 4 and even_count <= 4 and low_count <= 4 and high_count <= 4:
             prediction.add(candidate)
 
@@ -102,12 +104,13 @@ def generate_prediction():
 
 
 # === Display predictions ===
-st.subheader("🎲 Predicted Combinations")
+st.subheader(f"🎲 {draw_type} Predicted Combinations")
 
 cols = st.columns(3)
 
 for i in range(3):
-    prediction = generate_prediction()
+    seed_offset = i if draw_type == "Lunch Time" else i + 100
+    prediction = generate_prediction(seed_offset)
     with cols[i]:
         st.markdown(f"### 🎯 Combo {i+1}")
         st.write(prediction)

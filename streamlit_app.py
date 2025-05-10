@@ -23,45 +23,59 @@ def fetch_latest_results():
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Debugging: Print the first 500 characters of the HTML to check structure
-        st.write(soup.prettify()[:500])
+        past_results = []
 
-        # Extract the latest draw date and numbers
-        draw_date_element = soup.find('h2')
-        if draw_date_element:
-            draw_date = draw_date_element.text.strip()
-        else:
-            raise ValueError("Could not find draw date.")
+        # Find all rows in the results table
+        rows = soup.select('table.past-results tbody tr')
 
-        # Extract numbers from the page
-        numbers_element = soup.find('ul', class_='numbers')
-        if numbers_element:
-            numbers = [int(num) for num in numbers_element.text.split() if num.isdigit()]
-        else:
-            raise ValueError("Could not find numbers.")
+        for row in rows[:5]:  # Get latest 5 draws
+            date_td = row.select_one('td.date-row')
+            balls = row.select('ul.balls li.ball')
 
-        return draw_date, numbers
+            # Extract date
+            draw_date = date_td.text.strip() if date_td else "Unknown Date"
+
+            # Extract 6 main balls (skip the bonus)
+            numbers = []
+            for li in balls:
+                num_text = li.text.strip()
+                if num_text.isdigit():
+                    numbers.append(int(num_text))
+                if len(numbers) == 6:  # Only take first 6 balls
+                    break
+
+            if len(numbers) == 6:
+                past_results.append(numbers)
+
+        if not past_results:
+            raise ValueError("No results found")
+
+        return past_results
 
     except Exception as e:
         st.error(f"Error fetching results: {e}")
-        return None, None
+        return None
 
 # === Fetch results with error handling ===
-draw_date, past_results = fetch_latest_results()
+past_results = fetch_latest_results()
 
-if draw_date and past_results:
+if past_results:
     st.success("✅ Live results fetched successfully!")
-    st.subheader(f"Latest Lunchtime Draw: {draw_date}")
-    st.write("Winning Numbers:", past_results)
+    st.subheader("Latest Draws")
+    for draw in past_results:
+        st.write(draw)
 else:
     st.warning("⚠️ Failed to fetch live results. Using sample data.")
-    # Sample data for testing
-    draw_date = "Saturday 10th May 2025"
-    past_results = [1, 7, 17, 27, 30, 33, 38]
-    st.write("Winning Numbers:", past_results)
+    past_results = [
+        [1, 7, 17, 27, 30, 33],
+        [2, 13, 23, 44, 45, 47],
+        [5, 12, 23, 34, 45, 48],
+        [1, 14, 22, 33, 39, 44],
+        [7, 9, 16, 29, 36, 40],
+    ]
 
 # === Count frequency ===
-all_numbers = [num for num in past_results]
+all_numbers = [num for draw in past_results for num in draw]
 number_counts = Counter(all_numbers)
 
 hot_numbers = [num for num, count in number_counts.most_common()]
@@ -73,13 +87,12 @@ st.write(hot_numbers[:6])
 st.subheader("❄️ Cold Numbers")
 st.write(cold_numbers[:6])
 
-
 # === Generate prediction ===
 def generate_prediction(seed_offset):
     random.seed(seed_offset)
     prediction = set()
 
-    prediction.update(random.sample(hot_numbers[:15], 2))
+    prediction.update(random.sample(hot_numbers[:10], 2))
     prediction.update(random.sample(cold_numbers[:20], 2))
 
     while len(prediction) < 6:
@@ -97,7 +110,6 @@ def generate_prediction(seed_offset):
 
     return sorted(prediction)
 
-
 # === Color code function ===
 def color_number(n):
     if n <= 9:
@@ -111,7 +123,6 @@ def color_number(n):
     else:
         return f"<span style='color:purple;font-weight:bold;'>{n}</span>"
 
-
 # === Display predictions ===
 st.subheader(f"🎲 {draw_type} Predicted Combinations")
 
@@ -124,4 +135,3 @@ for i in range(3):
         st.markdown(f"### 🎯 Combo {i+1}")
         colored = " ".join([color_number(n) for n in prediction])
         st.markdown(colored, unsafe_allow_html=True)
-

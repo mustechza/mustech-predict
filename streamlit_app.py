@@ -23,9 +23,22 @@ def fetch_latest_results():
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # Debugging: Print the first 500 characters of the HTML to check structure
+        st.write(soup.prettify()[:500])
+
         # Extract the latest draw date and numbers
-        draw_date = soup.find('h2').text.strip()
-        numbers = [int(num) for num in soup.find('ul', class_='numbers').text.split() if num.isdigit()]
+        draw_date_element = soup.find('h2')
+        if draw_date_element:
+            draw_date = draw_date_element.text.strip()
+        else:
+            raise ValueError("Could not find draw date.")
+
+        # Extract numbers from the page
+        numbers_element = soup.find('ul', class_='numbers')
+        if numbers_element:
+            numbers = [int(num) for num in numbers_element.text.split() if num.isdigit()]
+        else:
+            raise ValueError("Could not find numbers.")
 
         return draw_date, numbers
 
@@ -48,7 +61,7 @@ else:
     st.write("Winning Numbers:", past_results)
 
 # === Count frequency ===
-all_numbers = [num for draw in past_results for num in draw]
+all_numbers = [num for num in past_results]
 number_counts = Counter(all_numbers)
 
 hot_numbers = [num for num, count in number_counts.most_common()]

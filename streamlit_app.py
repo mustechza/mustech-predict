@@ -15,57 +15,37 @@ if st.button("🔄 Refresh Predictions"):
 
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
-    urls = [
-        'https://uk49s.net/',  # New stable source
-    ]
+    url = 'https://za.lottonumbers.com/uk-49s-lunchtime/past-results'
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
-    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-    for url in urls:
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
+        # Extract the latest draw date and numbers
+        draw_date = soup.find('h2').text.strip()
+        numbers = [int(num) for num in soup.find('ul', class_='numbers').text.split() if num.isdigit()]
 
-            past_results = []
-            draws = soup.select('.balls .ball')
+        return draw_date, numbers
 
-            numbers = [int(ball.text.strip()) for ball in draws if ball.text.strip().isdigit()]
-
-            # Group them in chunks of 6
-            for i in range(0, len(numbers), 6):
-                chunk = numbers[i:i+6]
-                if len(chunk) == 6:
-                    past_results.append(chunk)
-
-            if past_results:
-                return past_results
-
-        except Exception as e:
-            continue
-
-    raise Exception("All sources failed")
-
+    except Exception as e:
+        st.error(f"Error fetching results: {e}")
+        return None, None
 
 # === Fetch results with error handling ===
-try:
-    past_results = fetch_latest_results()
-    st.success("✅ Live results fetched successfully!")
-except Exception as e:
-    st.warning(f"⚠️ Failed to fetch live results. Using sample data.")
-    past_results = [
-        [5, 12, 23, 34, 45, 48],
-        [1, 14, 22, 33, 39, 44],
-        [7, 9, 16, 29, 36, 40],
-        [3, 18, 21, 30, 42, 49],
-        [6, 13, 27, 31, 38, 47],
-        [2, 10, 20, 32, 41, 46],
-        [4, 11, 19, 28, 35, 43],
-        [8, 15, 17, 24, 25, 37],
-    ]
+draw_date, past_results = fetch_latest_results()
 
+if draw_date and past_results:
+    st.success("✅ Live results fetched successfully!")
+    st.subheader(f"Latest Lunchtime Draw: {draw_date}")
+    st.write("Winning Numbers:", past_results)
+else:
+    st.warning("⚠️ Failed to fetch live results. Using sample data.")
+    # Sample data for testing
+    draw_date = "Saturday 10th May 2025"
+    past_results = [1, 7, 17, 27, 30, 33, 38]
+    st.write("Winning Numbers:", past_results)
 
 # === Count frequency ===
 all_numbers = [num for draw in past_results for num in draw]

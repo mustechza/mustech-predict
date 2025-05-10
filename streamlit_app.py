@@ -16,8 +16,7 @@ if st.button("🔄 Refresh Predictions"):
 # === Function to fetch latest UK49s results ===
 def fetch_latest_results():
     urls = [
-        'https://www.lottery.co.uk/49s/results',  # More stable source
-        'https://www.lottodraw.com/uk49s',
+        'https://www.national-lottery.com/49s',  # New stable source
     ]
 
     headers = {
@@ -31,12 +30,15 @@ def fetch_latest_results():
             soup = BeautifulSoup(response.text, 'html.parser')
 
             past_results = []
-            draws = soup.select('.balls, .drawn')[:10]
+            draws = soup.select('.balls .ball')
 
-            for draw in draws:
-                numbers = [int(n.text.strip()) for n in draw.select('li, span') if n.text.strip().isdigit()]
-                if len(numbers) >= 6:
-                    past_results.append(numbers[:6])
+            numbers = [int(ball.text.strip()) for ball in draws if ball.text.strip().isdigit()]
+
+            # Group them in chunks of 6
+            for i in range(0, len(numbers), 6):
+                chunk = numbers[i:i+6]
+                if len(chunk) == 6:
+                    past_results.append(chunk)
 
             if past_results:
                 return past_results
@@ -103,6 +105,20 @@ def generate_prediction(seed_offset):
     return sorted(prediction)
 
 
+# === Color code function ===
+def color_number(n):
+    if n <= 9:
+        return f"<span style='color:red;font-weight:bold;'>{n}</span>"
+    elif n <= 19:
+        return f"<span style='color:blue;font-weight:bold;'>{n}</span>"
+    elif n <= 29:
+        return f"<span style='color:green;font-weight:bold;'>{n}</span>"
+    elif n <= 39:
+        return f"<span style='color:orange;font-weight:bold;'>{n}</span>"
+    else:
+        return f"<span style='color:purple;font-weight:bold;'>{n}</span>"
+
+
 # === Display predictions ===
 st.subheader(f"🎲 {draw_type} Predicted Combinations")
 
@@ -113,4 +129,5 @@ for i in range(3):
     prediction = generate_prediction(seed_offset)
     with cols[i]:
         st.markdown(f"### 🎯 Combo {i+1}")
-        st.write(prediction)
+        colored = " ".join([color_number(n) for n in prediction])
+        st.markdown(colored, unsafe_allow_html=True)

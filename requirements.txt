@@ -1,3 +1,9 @@
 requests
 beautifulsoup4
 matplotlib
+random
+pandas 
+numpy
+collections
+streamlit
+time

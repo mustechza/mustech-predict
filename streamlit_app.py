@@ -1,58 +1,41 @@
-# === UK49s Predictor App (Level 3 + Level 4 Enhanced) ===
+# uk49s_level9_predictor.py
 import random
-import pandas as pd
-import numpy as np
+from collections import Counter
 import requests
 from bs4 import BeautifulSoup
-from collections import Counter
-import matplotlib.pyplot as plt
 import streamlit as st
+import matplotlib.pyplot as plt
+import numpy as np
 import time
 
-# Streamlit config
-st.set_page_config(page_title="UK49s Predictor 🎯", layout="wide")
+st.set_page_config(page_title="UK49s Predictor Level 9 🚀", layout="wide")
 
-# Page title
-st.markdown("<h1 style='color:purple;'>UK49s Predictor Pro 🎯</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:purple;'>UK49s Predictor 🎯 Level 9 🚀</h1>", unsafe_allow_html=True)
 
-# Draw selection
 draw_type = st.radio("Select Draw:", ["Lunch Time", "Tea Time"], horizontal=True)
 
-# === Function to fetch latest UK49s results ===
+# === Fetch Results ===
 def fetch_latest_results():
     url = 'https://za.lottonumbers.com/uk-49s-lunchtime/past-results'
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-
+    headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(url, headers=headers, timeout=10)
-    response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
-
     table = soup.find('table', {'class': 'past-results'})
-    if not table:
-        raise Exception("Could not find results table.")
-
     rows = table.select('tbody tr')
     past_results = []
-
     for row in rows[:10]:
         balls = row.select('ul.balls li.ball')
         numbers = [int(ball.text.strip()) for ball in balls]
         if len(numbers) >= 6:
             past_results.append(numbers[:6])
-
     draw_date = rows[0].select_one('td.date-row').text.strip()
     latest_draw = past_results[0]
-
     return past_results, draw_date, latest_draw
 
-# === Fetch results ===
 try:
     past_results, draw_date, latest_draw = fetch_latest_results()
     st.success(f"✅ Live results fetched! (Last Draw: {draw_date})")
-except Exception as e:
-    st.warning("⚠️ Failed to fetch live results. Using sample data.")
+except:
     draw_date = "Sample Data"
     past_results = [
         [5, 12, 23, 34, 45, 48],
@@ -66,231 +49,106 @@ except Exception as e:
     ]
     latest_draw = past_results[0]
 
-# === Color Function ===
+st.markdown(f"<h3 style='color:green;'>📅 Last Draw Date: {draw_date}</h3>", unsafe_allow_html=True)
+
+# === Color Number ===
 def color_number(n):
-    if n <= 9:
-        return f"<span style='color:red;font-weight:bold;font-size:24px'>{n}</span>"
-    elif n <= 19:
-        return f"<span style='color:blue;font-weight:bold;font-size:24px'>{n}</span>"
-    elif n <= 29:
-        return f"<span style='color:green;font-weight:bold;font-size:24px'>{n}</span>"
-    elif n <= 39:
-        return f"<span style='color:orange;font-weight:bold;font-size:24px'>{n}</span>"
-    else:
-        return f"<span style='color:purple;font-weight:bold;font-size:24px'>{n}</span>"
+    colors = {1: 'red', 2: 'blue', 3: 'green', 4: 'orange', 5: 'purple'}
+    if n <= 9: c = 'red'
+    elif n <= 19: c = 'blue'
+    elif n <= 29: c = 'green'
+    elif n <= 39: c = 'orange'
+    else: c = 'purple'
+    return f"<span style='color:{c};font-weight:bold;font-size:24px'>{n}</span>"
 
 # === Frequency Count ===
 all_numbers = [num for draw in past_results for num in draw]
 number_counts = Counter(all_numbers)
-
 hot_numbers = [num for num, count in number_counts.most_common()]
-cold_numbers = [num for num, count in number_counts.most_common()][::-1]
+cold_numbers = list(reversed(hot_numbers))
 
-# === Hot & Cold Numbers ===
-st.markdown("<h2 style='color:red;'>🔥 Hot Numbers</h2>", unsafe_allow_html=True)
-st.markdown(" ".join([f"<span style='font-size:28px;color:red;font-weight:bold'>{n}</span>" for n in hot_numbers[:6]]), unsafe_allow_html=True)
+# === Lucky Number Generator ===
+st.markdown("<h2 style='color:gold;'>🎲 Lucky Number Generator</h2>", unsafe_allow_html=True)
+if st.button("🎯 Spin My Lucky Numbers!"):
+    lucky_numbers = sorted(random.sample(range(1, 50), 6))
+    lucky_colored = " ".join([color_number(n) for n in lucky_numbers])
+    st.markdown(lucky_colored, unsafe_allow_html=True)
+    st.balloons()
 
-st.markdown("<h2 style='color:blue;'>❄️ Cold Numbers</h2>", unsafe_allow_html=True)
-st.markdown(" ".join([f"<span style='font-size:28px;color:blue;font-weight:bold'>{n}</span>" for n in cold_numbers[:6]]), unsafe_allow_html=True)
-
-# === Frequency Chart ===
-st.markdown("<h2 style='color:purple;'>📊 Number Frequency (Last 10 Draws)</h2>", unsafe_allow_html=True)
+# === Side by Side Hot-Cold Chart ===
+st.markdown("<h2 style='color:orange;'>📊 Hot vs Cold Chart</h2>", unsafe_allow_html=True)
 fig, ax = plt.subplots()
-ax.bar(number_counts.keys(), number_counts.values(), color='purple')
+ax.bar([str(n) for n in hot_numbers[:10]], [number_counts[n] for n in hot_numbers[:10]], color='red', label='Hot')
+ax.bar([str(n) for n in cold_numbers[:10]], [number_counts[n] for n in cold_numbers[:10]], color='blue', alpha=0.5, label='Cold')
 ax.set_xlabel('Number')
 ax.set_ylabel('Frequency')
+ax.legend()
 st.pyplot(fig)
 
 # === Generate Prediction ===
 def generate_prediction(seed_offset):
     random.seed(seed_offset)
     prediction = set()
-
-    prediction.update(random.sample(hot_numbers[:15], 2))  # Hot numbers
-    prediction.update(random.sample(cold_numbers[:20], 2))  # Cold numbers
-
+    prediction.update(random.sample(hot_numbers[:15], 2))
+    prediction.update(random.sample(cold_numbers[:20], 2))
     while len(prediction) < 6:
         candidate = random.randint(1, 49)
-
         temp = list(prediction) + [candidate]
         odd_count = sum(1 for n in temp if n % 2 != 0)
         even_count = sum(1 for n in temp if n % 2 == 0)
-
         low_count = sum(1 for n in temp if n <= 24)
         high_count = sum(1 for n in temp if n >= 25)
-
         if odd_count <= 4 and even_count <= 4 and low_count <= 4 and high_count <= 4:
             prediction.add(candidate)
-
     return sorted(prediction)
 
-# === Smart Filter (3+ matches) ===
-def smart_filter(predictions, actual_draw):
-    filtered = []
-    for pred in predictions:
-        matches = len(set(pred) & set(actual_draw))
-        if matches >= 3:
-            filtered.append((pred, matches))
-    return filtered
+# === Match Score ===
+def match_score(prediction):
+    matches = set(prediction) & set(latest_draw)
+    return len(matches), matches
 
-# === Animate Lucky Numbers with Spin Button ===
-st.markdown("<h2 style='color:orange;'>🎲 Lucky Number Generator</h2>", unsafe_allow_html=True)
+# === Smart Filter: Show only 3+ matched combos ===
+st.markdown("<h2 style='color:purple;'>🔥 Smart Filter: Best Combos</h2>", unsafe_allow_html=True)
+cols = st.columns(3)
 
-spin_button = st.button("Spin the Wheel 🎉")
-
-lucky_numbers = []
-if spin_button:
-    lucky_numbers = random.sample(range(1, 50), 6)
-    lucky_numbers = sorted(lucky_numbers)
-
-st.markdown(f"Your Lucky Numbers: {' '.join(map(str, lucky_numbers))}", unsafe_allow_html=True)
-
-# === Display Predictions (Filtered & Matched with Last Draw) ===
-st.markdown("<h2 style='color:green;'>🔮 Predictions & Matches</h2>", unsafe_allow_html=True)
-
-predictions = []
-for i in range(3):
+shown = 0
+for i in range(10):
     seed_offset = i if draw_type == "Lunch Time" else i + 100
     prediction = generate_prediction(seed_offset)
-    predictions.append(prediction)
+    score, matched = match_score(prediction)
+    confidence = round((score / 6) * 100)
+    if score >= 3:  # Smart Filter: show only combos with 3+ matches
+        with cols[shown % 3]:
+            st.markdown(f"<h4 style='color:green;'>Combo {i+1} (Confidence: {confidence}%)</h4>", unsafe_allow_html=True)
+            colored_pred = " ".join([
+                f"<span style='background-color:yellow'>{color_number(n)}</span>" if n in matched else color_number(n)
+                for n in prediction
+            ])
+            st.markdown(colored_pred, unsafe_allow_html=True)
+        shown += 1
 
-# Smart filter for predictions
-filtered_predictions = smart_filter(predictions, latest_draw)
+if shown == 0:
+    st.info("No combos with 3+ matches found this time. Spin again!")
 
-# Display the filtered predictions
-for i, (prediction, matches) in enumerate(filtered_predictions):
-    st.markdown(f"<h4 style='color:purple;'>Combo {i+1} - {matches} Match(es)</h4>", unsafe_allow_html=True)
-    colored_prediction = " ".join([color_number(n) for n in prediction])
-    st.markdown(colored_prediction, unsafe_allow_html=True)
+# === Last Draw Numbers ===
+st.markdown("<h2 style='color:teal;'>✅ Last Draw Numbers</h2>", unsafe_allow_html=True)
+colored_last = " ".join([color_number(n) for n in latest_draw])
+st.markdown(colored_last, unsafe_allow_html=True)
 
+# === Profit Calculator ===
+st.markdown("<h2 style='color:gold;'>💰 Profit Calculator</h2>", unsafe_allow_html=True)
+stake = st.number_input("Enter your stake amount (e.g. 10):", min_value=1)
+payout_table = {1: 7, 2: 57, 3: 401, 4: 2000, 5: 10000, 6: 125000}
 
+score, matched = match_score(latest_draw)
+profit = (payout_table.get(score, 0) * stake) - stake if score >= 1 else -stake
+st.markdown(f"🎯 Matches: {score} numbers")
+st.markdown(f"💰 Estimated Profit/Loss: **R{profit}**")
 
-# === 📈 Hot vs Cold Chart (Side by Side Bars) ===
-st.markdown("<h2 style='color:purple;'>📊 Hot vs Cold Numbers</h2>", unsafe_allow_html=True)
-
-hot_counts = [number_counts.get(n, 0) for n in range(1, 50)]
-cold_counts = [10 - c for c in hot_counts]
-
-fig2, ax2 = plt.subplots(figsize=(10, 5))
-bar_width = 0.35
-numbers = list(range(1, 50))
-
-ax2.bar([n - bar_width/2 for n in numbers], hot_counts, width=bar_width, color='red', label='Hot')
-ax2.bar([n + bar_width/2 for n in numbers], cold_counts, width=bar_width, color='blue', label='Cold')
-
+# === Number Frequency Chart ===
+st.markdown("<h2 style='color:purple;'>📊 Number Frequency (Last 10 Draws)</h2>", unsafe_allow_html=True)
+fig2, ax2 = plt.subplots()
+ax2.bar(number_counts.keys(), number_counts.values(), color='purple')
 ax2.set_xlabel('Number')
-ax2.set_ylabel('Count (Last 10 Draws)')
-ax2.legend()
+ax2.set_ylabel('Frequency')
 st.pyplot(fig2)
-
-# === 💰 Profit Calculator ===
-st.markdown("<h2 style='color:green;'>💰 Profit Calculator (Based on Matched Numbers)</h2>", unsafe_allow_html=True)
-
-# UK49s Lunchtime payout example odds
-odds_per_match = {
-    6: 70000,  # Match 6
-    5: 1250,   # Match 5
-    4: 100,    # Match 4
-    3: 13,     # Match 3
-    2: 2,      # Match 2
-}
-
-bet_amount = st.number_input("Enter your bet amount (£):", min_value=1, value=1, step=1)
-
-# Calculate for each filtered prediction
-for i, (prediction, matches) in enumerate(filtered_predictions):
-    payout = odds_per_match.get(matches, 0) * bet_amount
-    st.markdown(f"**Combo {i+1}: Matches {matches} - Potential Win: £{payout}**")
-
-
-import numpy as np  # Add at top if missing
-
-# === 📈 Trend Chart (Numbers appearance over draws) ===
-st.markdown("<h2 style='color:orange;'>📈 Number Appearance Trend (Last 10 Draws)</h2>", unsafe_allow_html=True)
-
-trend_counts = {n: [] for n in range(1, 50)}
-
-# Count per draw
-for draw in past_results:
-    draw_counts = Counter(draw)
-    for n in trend_counts:
-        trend_counts[n].append(draw_counts.get(n, 0))
-
-fig3, ax3 = plt.subplots(figsize=(12, 5))
-for n in range(1, 50):
-    counts = trend_counts[n]
-    if sum(counts) > 0:
-        ax3.plot(counts, label=str(n))
-
-ax3.set_xlabel('Draw Number (Recent → Older)')
-ax3.set_ylabel('Count')
-ax3.set_title('Trend per Number')
-ax3.legend(loc='upper right', bbox_to_anchor=(1.12, 1), fontsize='x-small', ncol=2)
-st.pyplot(fig3)
-
-
-# === 🔥 Number Heatmap ===
-st.markdown("<h2 style='color:red;'>🔥 Number Heatmap</h2>", unsafe_allow_html=True)
-
-heatmap_data = np.zeros((7, 7))
-
-for n in range(1, 50):
-    row = (n - 1) // 7
-    col = (n - 1) % 7
-    heatmap_data[row, col] = number_counts.get(n, 0)
-
-fig4, ax4 = plt.subplots(figsize=(8, 6))
-cax = ax4.matshow(heatmap_data, cmap='hot')
-fig4.colorbar(cax)
-
-for i in range(7):
-    for j in range(7):
-        num = i * 7 + j + 1
-        ax4.text(j, i, str(num), va='center', ha='center', color='white', fontsize=12, fontweight='bold')
-
-ax4.set_xticks([])
-ax4.set_yticks([])
-st.pyplot(fig4)
-import time  # Add at top if missing
-import pandas as pd  # Add at top if missing
-
-# === 🎲 Lucky Number Spinner ===
-st.markdown("<h2 style='color:purple;'>🎲 Lucky Number Spinner</h2>", unsafe_allow_html=True)
-
-if st.button("🎯 Spin My Lucky Numbers!"):
-    lucky_placeholder = st.empty()
-    for _ in range(20):  # Spin 20 times
-        spin_numbers = random.sample(range(1, 50), 6)
-        colored_spin = " ".join([color_number(n) for n in spin_numbers])
-        lucky_placeholder.markdown(colored_spin, unsafe_allow_html=True)
-        time.sleep(0.1)
-    st.success("✨ Here’s your Lucky Combo!")
-
-# === 🏅 Best Performer Numbers ===
-st.markdown("<h2 style='color:gold;'>🏅 Best Performer Numbers (Top 12)</h2>", unsafe_allow_html=True)
-
-best_numbers = hot_numbers[:12]
-best_colored = " ".join([color_number(n) for n in best_numbers])
-st.markdown(best_colored, unsafe_allow_html=True)
-
-# === 📥 Export Full Results ===
-st.markdown("<h2 style='color:green;'>📥 Download Full Results (CSV)</h2>", unsafe_allow_html=True)
-
-# Prepare DataFrame
-draws_data = {
-    "Draw #": list(range(1, len(past_results)+1)),
-    "Numbers": [", ".join(map(str, draw)) for draw in past_results]
-}
-
-df_results = pd.DataFrame(draws_data)
-
-csv = df_results.to_csv(index=False).encode('utf-8')
-
-st.download_button(
-    label="⬇️ Download Last 10 Draws as CSV",
-    data=csv,
-    file_name='uk49s_last10_draws.csv',
-    mime='text/csv',
-)
-
-

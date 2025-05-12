@@ -1,4 +1,3 @@
-# uk49s_level12_predictor.py
 import random
 from collections import Counter
 import requests
@@ -6,31 +5,15 @@ from bs4 import BeautifulSoup
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import time
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import pandas as pd
+import os
 
-st.set_page_config(page_title="UK49s Predictor Level 12 🚀", layout="wide")
-st.markdown("<h1 style='color:purple;'>UK49s Predictor 🎯 Level 12 🚀</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="UK49s Predictor Level 15 🚀", layout="wide")
+
+st.markdown("<h1 style='color:purple;'>UK49s Predictor 🎯 Level 15 🚀</h1>", unsafe_allow_html=True)
 
 draw_type = st.radio("Select Draw:", ["Lunch Time", "Tea Time"], horizontal=True)
-
-# === Auto Refresh ===
-refresh_interval = st.selectbox("🔄 Auto-Refresh Interval (minutes):", [0, 1, 2, 5, 10], index=0)
-if refresh_interval > 0:
-    countdown = refresh_interval * 60
-    last_refresh = time.time()
-    placeholder = st.empty()
-    while countdown > 0:
-        mins, secs = divmod(countdown, 60)
-        timer_display = f"⏳ Auto-refresh in {int(mins)}m {int(secs)}s"
-        placeholder.info(timer_display)
-        time.sleep(1)
-        countdown -= 1
-    placeholder.warning("♻️ Refreshing...")
-    st.experimental_rerun()
 
 # === Fetch Results ===
 def fetch_latest_results():
@@ -84,21 +67,15 @@ number_counts = Counter(all_numbers)
 hot_numbers = [num for num, count in number_counts.most_common()]
 cold_numbers = list(reversed(hot_numbers))
 
-# === Lucky Number Generator (Session State) ===
-if "lucky_numbers" not in st.session_state:
-    st.session_state.lucky_numbers = []
-
+# === Lucky Number Generator ===
 st.markdown("<h2 style='color:gold;'>🎲 Lucky Number Generator</h2>", unsafe_allow_html=True)
 if st.button("🎯 Spin My Lucky Numbers!"):
-    st.session_state.lucky_numbers = sorted(random.sample(range(1, 50), 6))
+    lucky_numbers = sorted(random.sample(range(1, 50), 6))
+    lucky_colored = " ".join([color_number(n) for n in lucky_numbers])
+    st.markdown(lucky_colored, unsafe_allow_html=True)
     st.balloons()
 
-# Show saved lucky numbers
-if st.session_state.lucky_numbers:
-    lucky_colored = " ".join([color_number(n) for n in st.session_state.lucky_numbers])
-    st.markdown(lucky_colored, unsafe_allow_html=True)
-
-# === Side by Side Hot-Cold Chart ===
+# === Hot-Cold Chart ===
 st.markdown("<h2 style='color:orange;'>📊 Hot vs Cold Chart</h2>", unsafe_allow_html=True)
 fig, ax = plt.subplots()
 ax.bar([str(n) for n in hot_numbers[:10]], [number_counts[n] for n in hot_numbers[:10]], color='red', label='Hot')
@@ -130,10 +107,9 @@ def match_score(prediction):
     matches = set(prediction) & set(latest_draw)
     return len(matches), matches
 
-# === Smart Filter: Show only 3+ matched combos ===
+# === Smart Filter Combos ===
 st.markdown("<h2 style='color:purple;'>🔥 Smart Filter: Best Combos</h2>", unsafe_allow_html=True)
 cols = st.columns(3)
-
 shown = 0
 for i in range(10):
     seed_offset = i if draw_type == "Lunch Time" else i + 100
@@ -149,37 +125,8 @@ for i in range(10):
             ])
             st.markdown(colored_pred, unsafe_allow_html=True)
         shown += 1
-
 if shown == 0:
     st.info("No combos with 3+ matches found this time. Spin again!")
-
-# === Email Alert Feature ===
-def send_email_alert(receiver_email, combo, confidence):
-    sender_email = "your_email@gmail.com"
-    sender_password = "your_app_password"  # Use Gmail App Password
-
-    subject = "🔥 UK49s Combo Alert!"
-    body = f"Your lucky combo matched 3+ numbers!\n\nCombo: {combo}\nConfidence: {confidence}%\n\nGood luck! 🎯"
-
-    message = MIMEMultipart()
-    message["From"] = sender_email
-    message["To"] = receiver_email
-    message["Subject"] = subject
-    message.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, receiver_email, message.as_string())
-
-st.markdown("<h2 style='color:blue;'>📧 Email Alert (When 3+ Match)</h2>", unsafe_allow_html=True)
-user_email = st.text_input("Enter your email to get alert:")
-
-if st.button("🚀 Send Me Alert Now!"):
-    if shown > 0 and user_email:
-        send_email_alert(user_email, prediction, confidence)
-        st.success(f"✅ Alert sent to {user_email}!")
-    else:
-        st.warning("⚠️ No combos matched or email missing.")
 
 # === Last Draw Numbers ===
 st.markdown("<h2 style='color:teal;'>✅ Last Draw Numbers</h2>", unsafe_allow_html=True)
@@ -190,12 +137,13 @@ st.markdown(colored_last, unsafe_allow_html=True)
 st.markdown("<h2 style='color:gold;'>💰 Profit Calculator</h2>", unsafe_allow_html=True)
 stake = st.number_input("Enter your stake amount (e.g. 10):", min_value=1)
 payout_table = {1: 7, 2: 57, 3: 401, 4: 2000, 5: 10000, 6: 125000}
+
 score, matched = match_score(latest_draw)
 profit = (payout_table.get(score, 0) * stake) - stake if score >= 1 else -stake
 st.markdown(f"🎯 Matches: {score} numbers")
 st.markdown(f"💰 Estimated Profit/Loss: **R{profit}**")
 
-# === Number Frequency Chart ===
+# === Frequency Chart ===
 st.markdown("<h2 style='color:purple;'>📊 Number Frequency (Last 10 Draws)</h2>", unsafe_allow_html=True)
 fig2, ax2 = plt.subplots()
 ax2.bar(number_counts.keys(), number_counts.values(), color='purple')
@@ -203,13 +151,72 @@ ax2.set_xlabel('Number')
 ax2.set_ylabel('Frequency')
 st.pyplot(fig2)
 
-# === Download Past Results as CSV ===
-st.markdown("<h2 style='color:green;'>📥 Download Past Results</h2>", unsafe_allow_html=True)
-df_past = pd.DataFrame(past_results, columns=[f'Ball {i+1}' for i in range(6)])
-csv = df_past.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="📥 Download Last 10 Draws as CSV",
-    data=csv,
-    file_name='uk49s_past_draws.csv',
-    mime='text/csv',
-)
+# === Level 13-15: Prediction Tracker ===
+history_file = "predictions_history.csv"
+if not os.path.exists(history_file):
+    df_init = pd.DataFrame(columns=["Date", "Prediction", "Matches", "Matched Numbers"])
+    df_init.to_csv(history_file, index=False)
+df_history = pd.read_csv(history_file)
+
+st.markdown("<h2 style='color:darkblue;'>📅 Prediction History vs Actual Results</h2>", unsafe_allow_html=True)
+st.dataframe(df_history.tail(10))
+
+# === Next Prediction ===
+st.markdown("<h2 style='color:green;'>🔮 Next Prediction (Auto-Saved)</h2>", unsafe_allow_html=True)
+next_prediction = generate_prediction(seed_offset=int(time.time()) % 1000)
+colored_next_pred = " ".join([color_number(n) for n in next_prediction])
+st.markdown(colored_next_pred, unsafe_allow_html=True)
+
+score, matched = match_score(next_prediction)
+new_entry = {
+    "Date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+    "Prediction": ", ".join(map(str, next_prediction)),
+    "Matches": score,
+    "Matched Numbers": ", ".join(map(str, matched)) if matched else "None"
+}
+df_history = pd.concat([df_history, pd.DataFrame([new_entry])], ignore_index=True)
+df_history.to_csv(history_file, index=False)
+st.success(f"✅ Saved prediction with {score} match(es)!")
+
+# === Accuracy Chart ===
+st.markdown("<h2 style='color:orange;'>📈 Prediction Accuracy Over Time</h2>", unsafe_allow_html=True)
+df_history["Matches"] = pd.to_numeric(df_history["Matches"], errors='coerce')
+fig3, ax3 = plt.subplots()
+ax3.plot(df_history["Date"], df_history["Matches"], marker='o', color='purple', linestyle='-')
+ax3.set_xlabel("Date")
+ax3.set_ylabel("Matches (out of 6)")
+ax3.set_title("Prediction Accuracy Over Time")
+ax3.grid(True)
+plt.xticks(rotation=45, ha='right')
+st.pyplot(fig3)
+
+# === Download Button ===
+st.markdown("<h2 style='color:teal;'>⬇️ Download Your Full Prediction History</h2>", unsafe_allow_html=True)
+csv = df_history.to_csv(index=False).encode('utf-8')
+st.download_button("Download CSV", csv, "prediction_history.csv", "text/csv", key='download-csv')
+
+# === Clear History ===
+st.markdown("<h2 style='color:red;'>🧹 Reset Prediction History</h2>", unsafe_allow_html=True)
+if st.button("⚠️ Clear All History"):
+    df_clear = pd.DataFrame(columns=["Date", "Prediction", "Matches", "Matched Numbers"])
+    df_clear.to_csv(history_file, index=False)
+    st.success("✅ History cleared! Please refresh app to see changes.")
+
+# === Level 15: Win Rate + Best Prediction ===
+st.markdown("<h2 style='color:gold;'>🏆 Tracker Stats</h2>", unsafe_allow_html=True)
+total_preds = len(df_history)
+total_wins = df_history[df_history["Matches"] >= 3].shape[0]
+win_rate = round((total_wins / total_preds) * 100, 2) if total_preds > 0 else 0
+
+best_row = df_history.sort_values("Matches", ascending=False).iloc[0] if total_preds > 0 else None
+
+st.markdown(f"✅ Total Predictions: **{total_preds}**")
+st.markdown(f"🎯 Predictions with 3+ matches: **{total_wins}**")
+st.markdown(f"🔥 Win Rate (3+ matches): **{win_rate}%**")
+
+if best_row is not None:
+    st.markdown(f"🏅 Best Ever Prediction: {best_row['Prediction']} with {best_row['Matches']} matches on {best_row['Date']}")
+
+# === Optional Jackpot Alert ===
+if score >= 4:
+    st.markdown(f"<h2 style='color:red;'>🎉 JACKPOT! You got {score} matches in this prediction! 🎉</h2>", unsafe_allow_html=True)

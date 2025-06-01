@@ -54,6 +54,8 @@ stake = st.sidebar.number_input("💰 Stake per prediction", min_value=1, value=
 
 # Show last result
 st.markdown("### 🕒 Latest Draw Result")
+draw_numbers = []  # Ensure draw_numbers is defined
+df_results = df_results.copy()
 latest_draw = df_results.iloc[-1] if not df_results.empty else None
 if latest_draw is not None:
     draw_numbers = list(map(int, latest_draw["Numbers"].strip("[]").split(", ")))
@@ -76,8 +78,9 @@ if latest_draw is not None:
 # Match breakdown table
 def generate_breakdown_row(pred, actual):
     return [{"Number": n, "Matched": "✅" if n in actual else "❌"} for n in pred]
-st.markdown("### 🧩 Match Breakdown")
-st.table(pd.DataFrame(generate_breakdown_row(next_prediction, draw_numbers)))
+if draw_numbers:
+    st.markdown("### 🧩 Match Breakdown")
+    st.table(pd.DataFrame(generate_breakdown_row(next_prediction, draw_numbers)))
 
 # Append prediction to history (simulate)
 def save_prediction(prediction, score):

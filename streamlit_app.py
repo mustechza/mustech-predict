@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from collections import Counter
+import itertools
 
 # ----------------- Config -----------------
 st.set_page_config(layout="wide", page_title="UK49s Real-Time Dashboard")
@@ -20,7 +21,6 @@ def fetch_latest_results(url):
         table = soup.find('table', {'class': 'past-results'})
         rows = table.select('tbody tr')
         past_results = []
-        draw_date = None
 
         for i, row in enumerate(rows[:7]):  # Last 7 draws
             balls = row.select('ul.balls li.ball')
@@ -28,10 +28,11 @@ def fetch_latest_results(url):
             if len(numbers) >= 6:
                 main = numbers[:6]
                 bonus = numbers[6] if len(numbers) > 6 else None
+                date = row.select_one('td.date-row').text.strip() if row.select_one('td.date-row') else 'Unknown'
                 past_results.append({
                     'main': main,
                     'bonus': bonus,
-                    'date': row.select_one('td.date-row').text.strip() if row.select_one('td.date-row') else 'Unknown'
+                    'date': date
                 })
 
         return past_results
@@ -69,6 +70,16 @@ def hot_and_cold(counter):
     hot = series.sort_values(ascending=False).head(5)
     cold = series.sort_values().head(5)
     return hot, cold
+
+# ----------------- Abbreviated Wheel Generator -----------------
+def generate_abbreviated_wheel(numbers, pick_count=10):
+    if len(numbers) < pick_count:
+        st.warning(f"Not enough missing numbers to pick {pick_count} numbers.")
+        return [], []
+
+    chosen_numbers = sorted(numbers)[:pick_count]
+    combos = list(itertools.combinations(chosen_numbers, 6))
+    return combos, chosen_numbers
 
 # ----------------- Fetch Both Draws -----------------
 lunch_url = 'https://za.lottonumbers.com/uk-49s-lunchtime/past-results'
@@ -127,8 +138,33 @@ col5, col6 = st.columns(2)
 
 with col5:
     st.markdown("### 🟡 Lunchtime Missing Numbers")
-    st.write(get_missing_numbers(lunch_data))
+    missing_lunch = get_missing_numbers(lunch_data)
+    st.write(missing_lunch)
 
 with col6:
     st.markdown("### 🟢 Teatime Missing Numbers")
-    st.write(get_missing_numbers(tea_data))
+    missing_tea = get_missing_numbers(tea_data)
+    st.write(missing_tea)
+
+# ----------------- Abbreviated Wheel Generator UI -----------------
+st.subheader("🎯 Abbreviated Wheel Generator from Missing Numbers")
+
+with st.form("wheel_form"):
+    wheel_pick_count = st.slider(
+        "Select how many missing numbers to use for the wheel",
+        min_value=6, max_value=15, value=10)
+    wheel_draw_type = st.radio(
+        "Select Draw Type",
+        options=["Lunchtime", "Teatime"],
+        index=0)
+    submitted = st.form_submit_button("Generate Wheel")
+
+if submitted:
+    missing = missing_lunch if wheel_draw_type == "Lunchtime" else missing_tea
+    combos, chosen = generate_abbreviated_wheel(missing, wheel_pick_count)
+    if combos:
+        st.write(f"Using numbers: {chosen}")
+        st.write(f"Total combinations (bets): {len(combos)}")
+        st.write("First 10 combinations:")
+        for combo in combos[:10]:
+            st.write(combo)

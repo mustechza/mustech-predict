@@ -2,169 +2,109 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from collections import Counter
 import itertools
+from collections import Counter
+import random
+import unimatrix_zero as uz
 
-# ----------------- Config -----------------
-st.set_page_config(layout="wide", page_title="UK49s Real-Time Dashboard")
-st.title("🔢 UK49s Real-Time Results Dashboard")
+# ------------------------ Config ------------------------
+st.set_page_config(page_title="UK49s Wheel Predictor", layout="wide")
+st.title("🎯 UK49s Predictor & Wheel Generator")
 
-HEADERS = {'User-Agent': 'Mozilla/5.0'}
-ALL_NUMBERS = set(range(1, 50))
+# ------------------------ Fetch Results ------------------------
+def fetch_results(draw_type="lunchtime"):
+    base_url = f"https://za.lottonumbers.com/uk-49s-{draw_type}/past-results"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(base_url, headers=headers, timeout=10)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    table = soup.find('table', {'class': 'past-results'})
+    rows = table.select('tbody tr')
+    results = []
+    for row in rows[:7]:  # Last 7 results
+        balls = row.select('ul.balls li.ball')
+        numbers = [int(ball.text.strip()) for ball in balls if ball.text.strip().isdigit()]
+        if len(numbers) >= 6:
+            results.append(numbers[:6])
+    return results
 
-# ----------------- Fetch Results -----------------
-def fetch_latest_results(url):
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        table = soup.find('table', {'class': 'past-results'})
-        rows = table.select('tbody tr')
-        past_results = []
-
-        for i, row in enumerate(rows[:7]):  # Last 7 draws
-            balls = row.select('ul.balls li.ball')
-            numbers = [int(ball.text.strip()) for ball in balls]
-            if len(numbers) >= 6:
-                main = numbers[:6]
-                bonus = numbers[6] if len(numbers) > 6 else None
-                date = row.select_one('td.date-row').text.strip() if row.select_one('td.date-row') else 'Unknown'
-                past_results.append({
-                    'main': main,
-                    'bonus': bonus,
-                    'date': date
-                })
-
-        return past_results
-
-    except Exception as e:
-        st.error(f"Scraping failed: {e}")
-        return []
-
-# ----------------- Data Processing -----------------
-def results_to_dataframe(results, draw_type):
-    records = []
-    for entry in results:
-        records.append({
-            "Draw Type": draw_type,
-            "Date": entry["date"],
-            "Main Numbers": entry["main"],
-            "Bonus": entry["bonus"]
-        })
-    return pd.DataFrame(records)
-
-def get_number_frequency(results):
-    all_numbers = []
-    for draw in results:
-        all_numbers.extend(draw['main'])
-    return Counter(all_numbers)
+# ------------------------ Frequency & Missing ------------------------
+def get_frequency(results):
+    flat = list(itertools.chain.from_iterable(results))
+    return Counter(flat)
 
 def get_missing_numbers(results):
-    appeared = set()
-    for draw in results:
-        appeared.update(draw['main'])
-    return sorted(ALL_NUMBERS - appeared)
+    appeared = set(itertools.chain.from_iterable(results))
+    return sorted(set(range(1, 50)) - appeared)
 
-def hot_and_cold(counter):
-    series = pd.Series(counter)
-    hot = series.sort_values(ascending=False).head(5)
-    cold = series.sort_values().head(5)
-    return hot, cold
+# ------------------------ Display Past Results ------------------------
+lunch_results = fetch_results("lunchtime")
+tea_results = fetch_results("teatime")
 
-# ----------------- Abbreviated Wheel Generator -----------------
-def generate_abbreviated_wheel(numbers, pick_count=10):
-    if len(numbers) < pick_count:
-        st.warning(f"Not enough missing numbers to pick {pick_count} numbers.")
-        return [], []
-
-    chosen_numbers = sorted(numbers)[:pick_count]
-    combos = list(itertools.combinations(chosen_numbers, 6))
-    return combos, chosen_numbers
-
-# ----------------- Fetch Both Draws -----------------
-lunch_url = 'https://za.lottonumbers.com/uk-49s-lunchtime/past-results'
-tea_url = 'https://za.lottonumbers.com/uk-49s-teatime/past-results'
-
-lunch_data = fetch_latest_results(lunch_url)
-tea_data = fetch_latest_results(tea_url)
-
-if not lunch_data and not tea_data:
-    st.stop()
-
-lunch_df = results_to_dataframe(lunch_data, "Lunchtime")
-tea_df = results_to_dataframe(tea_data, "Teatime")
-df = pd.concat([lunch_df, tea_df], ignore_index=True)
-
-# ----------------- Display Draw Table -----------------
-st.subheader("📅 Last 7 UK49s Results (Lunchtime & Teatime)")
-st.dataframe(df, use_container_width=True)
-
-# ----------------- Frequency Charts -----------------
+st.header("🕒 Past Draws")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("🔥 Lunchtime Frequency")
-    lunch_freq = get_number_frequency(lunch_data)
-    if lunch_freq:
-        st.bar_chart(pd.Series(lunch_freq).sort_values(ascending=False))
-
+    st.subheader("Lunchtime (Last 7)")
+    st.table(pd.DataFrame(lunch_results, columns=["1","2","3","4","5","6"]))
 with col2:
-    st.subheader("🔥 Teatime Frequency")
-    tea_freq = get_number_frequency(tea_data)
-    if tea_freq:
-        st.bar_chart(pd.Series(tea_freq).sort_values(ascending=False))
+    st.subheader("Teatime (Last 7)")
+    st.table(pd.DataFrame(tea_results, columns=["1","2","3","4","5","6"]))
 
-# ----------------- Hot and Cold Numbers -----------------
-st.subheader("📊 Hot & Cold Numbers (Top & Bottom 5)")
+# ------------------------ Frequency & Missing Table ------------------------
+lunch_freq = get_frequency(lunch_results)
+tea_freq = get_frequency(tea_results)
 
+missing_lunch = get_missing_numbers(lunch_results)
+missing_tea = get_missing_numbers(tea_results)
+
+st.header("📊 Analysis")
 col3, col4 = st.columns(2)
 
 with col3:
-    st.markdown("### 🔴 Lunchtime")
-    hot_l, cold_l = hot_and_cold(lunch_freq)
-    st.write("🔥 Hot:", hot_l.to_dict())
-    st.write("❄️ Cold:", cold_l.to_dict())
-
-with col4:
-    st.markdown("### 🔵 Teatime")
-    hot_t, cold_t = hot_and_cold(tea_freq)
-    st.write("🔥 Hot:", hot_t.to_dict())
-    st.write("❄️ Cold:", cold_t.to_dict())
-
-# ----------------- Missing Numbers -----------------
-st.subheader("🚫 Missing Numbers in Last 7 Draws")
-
-col5, col6 = st.columns(2)
-
-with col5:
-    st.markdown("### 🟡 Lunchtime Missing Numbers")
-    missing_lunch = get_missing_numbers(lunch_data)
+    st.subheader("Missing Lunchtime Numbers")
     st.write(missing_lunch)
 
-with col6:
-    st.markdown("### 🟢 Teatime Missing Numbers")
-    missing_tea = get_missing_numbers(tea_data)
+with col4:
+    st.subheader("Missing Teatime Numbers")
     st.write(missing_tea)
 
-# ----------------- Abbreviated Wheel Generator UI -----------------
-st.subheader("🎯 Abbreviated Wheel Generator from Missing Numbers")
+# ------------------------ Random Wheel Generator ------------------------
+def generate_random_wheel(numbers, pick_count=10):
+    chosen = sorted(random.sample(numbers, pick_count))
+    return list(itertools.combinations(chosen, 6)), chosen
 
-with st.form("wheel_form"):
-    wheel_pick_count = st.slider(
-        "Select how many missing numbers to use for the wheel",
-        min_value=6, max_value=15, value=10)
-    wheel_draw_type = st.radio(
-        "Select Draw Type",
-        options=["Lunchtime", "Teatime"],
-        index=0)
-    submitted = st.form_submit_button("Generate Wheel")
+st.header("🎲 Random Wheel Generator")
+with st.form("random_wheel_form"):
+    draw_type = st.radio("Draw type", ["Lunchtime", "Teatime"], key="r_draw")
+    pool = missing_lunch if draw_type == "Lunchtime" else missing_tea
+    pick_count = st.slider("Pick how many numbers to use", 6, min(len(pool), 15), 10)
+    submit_random = st.form_submit_button("Generate Random Wheel")
 
-if submitted:
-    missing = missing_lunch if wheel_draw_type == "Lunchtime" else missing_tea
-    combos, chosen = generate_abbreviated_wheel(missing, wheel_pick_count)
-    if combos:
-        st.write(f"Using numbers: {chosen}")
-        st.write(f"Total combinations (bets): {len(combos)}")
-        st.write("First 10 combinations:")
-        for combo in combos[:10]:
-            st.write(combo)
+if submit_random:
+    combos, selected = generate_random_wheel(pool, pick_count)
+    st.success(f"Generated {len(combos)} combinations from: {selected}")
+    st.dataframe(pd.DataFrame(combos[:10]))
+    csv = pd.DataFrame(combos).to_csv(index=False).encode()
+    st.download_button("Download CSV", data=csv, file_name="random_wheel.csv")
+
+# ------------------------ Guaranteed Wheel via unimatrix-zero ------------------------
+st.header("🧩 Guaranteed Wheel Generator")
+with st.form("guaranteed_form"):
+    draw_type_g = st.radio("Draw type", ["Lunchtime", "Teatime"], key="g_draw")
+    pool_g = missing_lunch if draw_type_g == "Lunchtime" else missing_tea
+    pick_size = st.slider("Pick size (k)", 6, 8, 6)
+    guarantee = st.slider("Guarantee size (t)", 2, pick_size - 1, 3)
+    num_pool = st.slider("Number of missing numbers to use", pick_size + 1, min(20, len(pool_g)), pick_size + 4)
+    submitted_g = st.form_submit_button("Generate Guaranteed Wheel")
+
+if submitted_g:
+    if len(pool_g) < num_pool:
+        st.error("Not enough numbers in pool.")
+    else:
+        chosen_pool = sorted(pool_g[:num_pool])
+        design = uz.generate_design(n=num_pool, k=pick_size, t=guarantee)
+        wheel = [[chosen_pool[i] for i in combo] for combo in design]
+        st.success(f"Generated {len(wheel)} guaranteed combinations from {num_pool} numbers")
+        st.dataframe(pd.DataFrame(wheel[:10]))
+        csv_g = pd.DataFrame(wheel).to_csv(index=False).encode()
+        st.download_button("Download Guaranteed Wheel CSV", data=csv_g, file_name="guaranteed_wheel.csv")

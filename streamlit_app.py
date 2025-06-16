@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from collections import Counter
 import itertools
+import random
 
 # ----------------- Config -----------------
 st.set_page_config(layout="wide", page_title="UK49s Real-Time Dashboard")

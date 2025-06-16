@@ -71,15 +71,23 @@ def hot_and_cold(counter):
     cold = series.sort_values().head(5)
     return hot, cold
 
-# ----------------- Abbreviated Wheel Generator -----------------
-def generate_abbreviated_wheel(numbers, pick_count=10):
+# ----------------- Unique Combinations Generator -----------------
+def generate_unique_combinations(numbers, pick_count=10, combo_size=6, priority_order=None, exclude_combos=None):
     if len(numbers) < pick_count:
-        st.warning(f"Not enough missing numbers to pick {pick_count} numbers.")
+        st.warning(f"Not enough numbers to pick {pick_count}.")
         return [], []
 
-    chosen_numbers = sorted(numbers)[:pick_count]
-    combos = list(itertools.combinations(chosen_numbers, 6))
-    return combos, chosen_numbers
+    if priority_order:
+        numbers = sorted(numbers, key=lambda x: -priority_order.get(x, 0))
+
+    selected = sorted(numbers[:pick_count])
+    combo_set = set(itertools.combinations(selected, combo_size))
+
+    if exclude_combos:
+        combo_set = combo_set - exclude_combos
+
+    unique_combos = sorted(combo_set)
+    return unique_combos, selected
 
 # ----------------- Fetch Both Draws -----------------
 lunch_url = 'https://za.lottonumbers.com/uk-49s-lunchtime/past-results'
@@ -147,24 +155,62 @@ with col6:
     st.write(missing_tea)
 
 # ----------------- Abbreviated Wheel Generator UI -----------------
-st.subheader("🎯 Abbreviated Wheel Generator from Missing Numbers")
+st.subheader("🎯 Abbreviated Wheel Generator")
 
 with st.form("wheel_form"):
-    wheel_pick_count = st.slider(
-        "Select how many missing numbers to use for the wheel",
-        min_value=6, max_value=15, value=10)
-    wheel_draw_type = st.radio(
-        "Select Draw Type",
-        options=["Lunchtime", "Teatime"],
-        index=0)
+    wheel_pick_count = st.slider("Select how many numbers to use for the wheel", min_value=6, max_value=15, value=10)
+    wheel_draw_type = st.radio("Select Draw Type", options=["Lunchtime", "Teatime"], index=0)
+    priority_mode = st.checkbox("🔥 Prioritize Hot Numbers")
+    exclude_recent = st.checkbox("🚫 Exclude Recent Combos")
     submitted = st.form_submit_button("Generate Wheel")
 
 if submitted:
-    missing = missing_lunch if wheel_draw_type == "Lunchtime" else missing_tea
-    combos, chosen = generate_abbreviated_wheel(missing, wheel_pick_count)
+    data = lunch_data if wheel_draw_type == "Lunchtime" else tea_data
+    freq = lunch_freq if wheel_draw_type == "Lunchtime" else tea_freq
+    recent_combos = set(tuple(sorted(draw['main'])) for draw in data)
+
+    priority = freq if priority_mode else None
+    exclude = recent_combos if exclude_recent else None
+
+    combos, chosen = generate_unique_combinations(list(ALL_NUMBERS), pick_count=wheel_pick_count, priority_order=priority, exclude_combos=exclude)
+
     if combos:
-        st.write(f"Using numbers: {chosen}")
-        st.write(f"Total combinations (bets): {len(combos)}")
-        st.write("First 10 combinations:")
-        for combo in combos[:10]:
-            st.write(combo)
+        st.success(f"✅ Generated {len(combos)} unique combinations from {chosen}")
+        preview_df = pd.DataFrame(combos[:10], columns=[f"Num {i+1}" for i in range(6)])
+        st.dataframe(preview_df)
+
+        csv = pd.DataFrame(combos, columns=[f"Num {i+1}" for i in range(6)]).to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Full Wheel as CSV", data=csv, file_name=f"{wheel_draw_type.lower()}_unique_combos.csv", mime="text/csv")
+
+# ----------------- Simple Betting Simulator -----------------
+st.subheader("💸 Bet Simulator")
+
+with st.form("sim_form"):
+    strategy = st.selectbox("Choose a staking strategy", ["Flat", "Martingale", "Percentage"])
+    base_bet = st.number_input("Base Bet Amount", min_value=1.0, value=10.0)
+    win_probability = st.slider("Estimated Win Probability (%)", min_value=1, max_value=100, value=10)
+    total_rounds = st.slider("Number of Rounds", min_value=1, max_value=100, value=10)
+    submit_sim = st.form_submit_button("Simulate")
+
+if submit_sim:
+    balance = 1000.0
+    history = []
+    last_bet = base_bet
+
+    for round in range(total_rounds):
+        win = random.randint(1, 100) <= win_probability
+        profit = last_bet * 6 if win else -last_bet
+        balance += profit
+        history.append((round + 1, last_bet, profit, balance))
+
+        if strategy == "Martingale":
+            last_bet = base_bet if win else last_bet * 2
+        elif strategy == "Percentage":
+            last_bet = balance * 0.1
+        else:  # Flat
+            last_bet = base_bet
+
+    sim_df = pd.DataFrame(history, columns=["Round", "Bet", "Profit", "Balance"])
+    st.line_chart(sim_df.set_index("Round")["Balance"])
+    st.dataframe(sim_df)
+    st.success(f"Final Balance: {balance:.2f}")

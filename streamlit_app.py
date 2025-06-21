@@ -30,7 +30,6 @@ def fetch_latest_results(draw_type="Lunchtime", limit=50):
         numbers = [int(ball.text.strip()) for ball in balls if ball.text.strip().isdigit()]
         if len(numbers) >= 6:
             past_results.append(numbers[:6])
-        # Capture latest draw date from first draw
         if draw_date == "N/A":
             date_text = draw.select_one('div.resultBox > div')
             if date_text:
@@ -48,6 +47,9 @@ draw_limit = st.sidebar.selectbox("📅 Number of Past Draws to Analyze", [7, 14
 # ------------------ Load Draw Data ------------------ #
 with st.spinner(f"📥 Fetching UK49s {draw_type} Results..."):
     results, draw_date = fetch_latest_results(draw_type=draw_type, limit=draw_limit)
+    if not results:
+        st.error("❌ Failed to fetch or parse UK49s results.")
+        st.stop()
     df = pd.DataFrame(results, columns=["N1", "N2", "N3", "N4", "N5", "N6"])
     df['Numbers'] = df.values.tolist()
     st.success(f"Loaded {len(df)} draws (Latest: {draw_date})")
@@ -146,3 +148,4 @@ st.dataframe(freq_df.reset_index(drop=True), use_container_width=True)
 # ------------------ Download Option ------------------ #
 csv = top_wheels.to_csv(index=False)
 st.download_button("📥 Download Full Results", data=csv, file_name=f"UK49s_{draw_type}_Backtest.csv")
+

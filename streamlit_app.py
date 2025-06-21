@@ -27,12 +27,8 @@ def fetch_latest_results(draw_type="Lunchtime", limit=50):
         draw_date = "N/A"
 
         for draw in draw_divs[:limit]:
-            balls = draw.select('ul.balls li.ball')
-            numbers = []
-            for ball in balls:
-                num = re.findall(r'\d+', ball.text.strip())
-                if num:
-                    numbers.append(int(num[0]))
+            balls = draw.select('ul.balls li.ball:not(.bonus-ball)')
+numbers = [int(ball.get_text(strip=True)) for ball in balls if ball.get_text(strip=True).isdigit()]
             if len(numbers) >= 6:
                 past_results.append(numbers[:6])
             if draw_date == "N/A":

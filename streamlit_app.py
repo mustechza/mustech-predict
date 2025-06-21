@@ -12,19 +12,30 @@ st.title("🔁 UK49s Wheeling & Backtesting App")
 # ------------------ Fetch Live Data ------------------ #
 @st.cache_data
 def fetch_latest_results(draw_type="Lunchtime", limit=50):
-    base_url = 'https://za.lottonumbers.com/uk-49s-{}time/past-results'.format(draw_type.lower())
+    path = "uk-49s-lunchtime" if draw_type == "Lunchtime" else "uk-49s-teatime"
+    base_url = f'https://za.lottonumbers.com/{path}/past-results'
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(base_url, headers=headers, timeout=10)
     soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table', {'class': 'past-results'})
-    rows = table.select('tbody tr')
+
+    draw_divs = soup.select('div.draw')
+    if not draw_divs:
+        return [], "No draws found"
+
     past_results = []
-    for row in rows[:limit]:
-        balls = row.select('ul.balls li.ball')
-        numbers = [int(ball.text.strip()) for ball in balls]
+    draw_date = "N/A"
+
+    for draw in draw_divs[:limit]:
+        balls = draw.select('ul.balls li.ball:not(.bonus-ball)')
+        numbers = [int(ball.text.strip()) for ball in balls if ball.text.strip().isdigit()]
         if len(numbers) >= 6:
             past_results.append(numbers[:6])
-    draw_date = rows[0].select_one('td.date-row').text.strip()
+        # Capture latest draw date from first draw
+        if draw_date == "N/A":
+            date_text = draw.select_one('div.resultBox > div')
+            if date_text:
+                draw_date = date_text.text.strip()
+
     return past_results, draw_date
 
 # ------------------ Sidebar Controls ------------------ #

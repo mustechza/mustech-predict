@@ -28,7 +28,7 @@ def fetch_latest_results(draw_type="Lunchtime", limit=50):
 
         for draw in draw_divs[:limit]:
             balls = draw.select('ul.balls li.ball:not(.bonus-ball)')
-numbers = [int(ball.get_text(strip=True)) for ball in balls if ball.get_text(strip=True).isdigit()]
+            numbers = [int(ball.get_text(strip=True)) for ball in balls if ball.get_text(strip=True).isdigit()]
             if len(numbers) >= 6:
                 past_results.append(numbers[:6])
             if draw_date == "N/A":
@@ -151,3 +151,4 @@ st.dataframe(freq_df.reset_index(drop=True), use_container_width=True)
 # ------------------ Download Option ------------------ #
 csv = top_wheels.to_csv(index=False)
 st.download_button("📥 Download Full Results", data=csv, file_name=f"UK49s_{draw_type}_Backtest.csv")
+

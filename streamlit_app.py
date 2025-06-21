@@ -11,7 +11,7 @@ st.title("🔁 UK49s Wheeling & Backtesting App")
 
 # ------------------ Fetch Live Data ------------------ #
 @st.cache_data
-def fetch_latest_results(draw_type="Lunchtime", limit=50):
+def fetch_latest_results(draw_type="lunchtime", limit=50):
     base_url = 'https://za.lottonumbers.com/uk-49s-{}time/past-results'.format(draw_type.lower())
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(base_url, headers=headers, timeout=10)

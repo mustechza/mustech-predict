@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from itertools import combinations
 from collections import Counter
 import plotly.express as px
+import re
 
 st.set_page_config(layout="wide")
 st.title("🔁 UK49s Wheeling & Backtesting App")
@@ -15,27 +16,33 @@ def fetch_latest_results(draw_type="Lunchtime", limit=50):
     path = "uk-49s-lunchtime" if draw_type == "Lunchtime" else "uk-49s-teatime"
     base_url = f'https://za.lottonumbers.com/{path}/past-results'
     headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get(base_url, headers=headers, timeout=10)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    try:
+        response = requests.get(base_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        draw_divs = soup.select('div.draw')
+        if not draw_divs:
+            return [], "No draws found"
 
-    draw_divs = soup.select('div.draw')
-    if not draw_divs:
-        return [], "No draws found"
+        past_results = []
+        draw_date = "N/A"
 
-    past_results = []
-    draw_date = "N/A"
+        for draw in draw_divs[:limit]:
+            balls = draw.select('ul.balls li.ball')
+            numbers = []
+            for ball in balls:
+                num = re.findall(r'\d+', ball.text.strip())
+                if num:
+                    numbers.append(int(num[0]))
+            if len(numbers) >= 6:
+                past_results.append(numbers[:6])
+            if draw_date == "N/A":
+                date_text = draw.select_one('div.resultBox > div')
+                if date_text:
+                    draw_date = date_text.text.strip()
 
-    for draw in draw_divs[:limit]:
-        balls = draw.select('ul.balls li.ball:not(.bonus-ball)')
-        numbers = [int(ball.text.strip()) for ball in balls if ball.text.strip().isdigit()]
-        if len(numbers) >= 6:
-            past_results.append(numbers[:6])
-        if draw_date == "N/A":
-            date_text = draw.select_one('div.resultBox > div')
-            if date_text:
-                draw_date = date_text.text.strip()
-
-    return past_results, draw_date
+        return past_results, draw_date
+    except Exception as e:
+        return [], f"Error: {str(e)}"
 
 # ------------------ Sidebar Controls ------------------ #
 st.sidebar.header("⚙️ Settings")
@@ -48,7 +55,7 @@ draw_limit = st.sidebar.selectbox("📅 Number of Past Draws to Analyze", [7, 14
 with st.spinner(f"📥 Fetching UK49s {draw_type} Results..."):
     results, draw_date = fetch_latest_results(draw_type=draw_type, limit=draw_limit)
     if not results:
-        st.error("❌ Failed to fetch or parse UK49s results.")
+        st.error(f"❌ Failed to fetch or parse UK49s results.\n{draw_date}")
         st.stop()
     df = pd.DataFrame(results, columns=["N1", "N2", "N3", "N4", "N5", "N6"])
     df['Numbers'] = df.values.tolist()
@@ -148,4 +155,3 @@ st.dataframe(freq_df.reset_index(drop=True), use_container_width=True)
 # ------------------ Download Option ------------------ #
 csv = top_wheels.to_csv(index=False)
 st.download_button("📥 Download Full Results", data=csv, file_name=f"UK49s_{draw_type}_Backtest.csv")
-

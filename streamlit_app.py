@@ -12,7 +12,7 @@ st.title("🔁 UK49s Wheeling & Backtesting App")
 
 # ------------------ Fetch Live Data ------------------ #
 @st.cache_data
-def fetch_latest_results(draw_type="Lunchtime", limit=50):
+def fetch_latest_results(draw_type="Lunchtime", limit=50, debug=False):
     path = "uk-49s-lunchtime" if draw_type == "Lunchtime" else "uk-49s-teatime"
     base_url = f'https://za.lottonumbers.com/{path}/past-results'
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -21,6 +21,11 @@ def fetch_latest_results(draw_type="Lunchtime", limit=50):
         soup = BeautifulSoup(response.text, 'html.parser')
         draw_divs = soup.select('div.draw')
         if not draw_divs:
+            # Debug output
+            if debug:
+                sample = soup.prettify()[:1000]
+                return [], f"No draws found. Sample HTML:
+{sample}"
             return [], "No draws found"
 
         past_results = []
@@ -151,4 +156,3 @@ st.dataframe(freq_df.reset_index(drop=True), use_container_width=True)
 # ------------------ Download Option ------------------ #
 csv = top_wheels.to_csv(index=False)
 st.download_button("📥 Download Full Results", data=csv, file_name=f"UK49s_{draw_type}_Backtest.csv")
-

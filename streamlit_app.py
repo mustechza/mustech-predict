@@ -1,50 +1,36 @@
 import streamlit as st
 import os
-import importlib.util
+import sys
 
-# =====================================================
-# SAFE MODULE LOADER (FIXES ALL STREAMLIT IMPORT ISSUES)
-# =====================================================
-def load_module(path, name):
-    full_path = os.path.join(os.path.dirname(__file__), path)
+# ===============================
+# FIX STREAMLIT IMPORT PATH
+# ===============================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
 
-    spec = importlib.util.spec_from_file_location(name, full_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+# ===============================
+# IMPORTS
+# ===============================
+from data.loader import load_json
+from models.lstm import LSTMModel
+from models.agent import Agent
+from training.pretrain import pretrain
+from training.utils import build_state
 
-    return module
+# ===============================
+# PAGE CONFIG
+# ===============================
+st.set_page_config(
+    page_title="Hybrid Crash AI",
+    layout="wide"
+)
 
+st.title("🚀 Hybrid LSTM + RL Crash AI")
+st.caption("Live crash multiplier prediction with LSTM + Reinforcement Learning")
 
-# =====================================================
-# LOAD MODELS (NO IMPORT ERRORS EVER)
-# =====================================================
-agent_mod = load_module("models/agent.py", "agent")
-lstm_mod = load_module("models/lstm.py", "lstm")
-
-Agent = agent_mod.Agent
-LSTMModel = lstm_mod.LSTMModel
-
-# =====================================================
-# LOAD TRAINING + DATA UTILITIES
-# =====================================================
-utils_mod = load_module("training/utils.py", "utils")
-pretrain_mod = load_module("training/pretrain.py", "pretrain")
-loader_mod = load_module("data/loader.py", "loader")
-
-build_state = utils_mod.build_state
-pretrain = pretrain_mod.pretrain
-load_json = loader_mod.load_json
-
-
-# =====================================================
-# STREAMLIT CONFIG
-# =====================================================
-st.set_page_config(page_title="Hybrid Crash AI", layout="wide")
-st.title("🚀 Hybrid LSTM + RL Crash AI (FIXED)")
-
-# =====================================================
-# SESSION STATE
-# =====================================================
+# ===============================
+# SESSION STATE INIT
+# ===============================
 if "history" not in st.session_state:
     st.session_state.history = []
 
@@ -58,77 +44,130 @@ history = st.session_state.history
 lstm = st.session_state.lstm
 agent = st.session_state.agent
 
+# ===============================
+# SIDEBAR PRETRAINING
+# ===============================
+st.sidebar.header("📂 Model Pretraining")
 
-# =====================================================
-# SIDEBAR: JSON PRETRAIN
-# =====================================================
-st.sidebar.header("📂 Pretraining")
-
-uploaded_file = st.sidebar.file_uploader("Upload crash JSON", type=["json"])
+uploaded_file = st.sidebar.file_uploader(
+    "Upload crash JSON file",
+    type=["json"]
+)
 
 if uploaded_file is not None:
-    data = load_json(uploaded_file)
+    try:
+        data = load_json(uploaded_file)
+        st.sidebar.success(f"Loaded {len(data)} rounds")
 
-    st.sidebar.success(f"Loaded {len(data)} rounds")
+        if st.sidebar.button("🚀 Start Pretraining"):
+            with st.spinner("Training LSTM + RL models..."):
+                pretrain(data, lstm, agent)
 
-    if st.sidebar.button("🚀 Pretrain AI"):
-        with st.spinner("Training LSTM + RL..."):
-            pretrain(data, lstm, agent)
+            # Keep recent rounds only
+            st.session_state.history = data[-50:]
 
-        st.session_state.history = data[-50:]
-        st.sidebar.success("✅ Pretraining complete")
+            st.sidebar.success("✅ Pretraining completed")
 
+    except Exception as e:
+        st.sidebar.error(f"Error loading file: {str(e)}")
 
-# =====================================================
-# LIVE INPUT SYSTEM
-# =====================================================
+# ===============================
+# LIVE INPUT SECTION
+# ===============================
 st.subheader("🎮 Live Market Input")
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([2, 1])
 
 with col1:
-    mult = st.number_input("Enter multiplier", min_value=1.0, step=0.01)
+    mult = st.number_input(
+        "Enter latest crash multiplier",
+        min_value=1.00,
+        step=0.01,
+        format="%.2f"
+    )
 
 with col2:
-    if st.button("➕ Add Round"):
-        history.append(float(mult))
+    st.write("")
+    st.write("")
+    add_round = st.button("➕ Add Round")
 
+if add_round:
+    history.append(float(mult))
+    st.success(f"Added round: {mult}x")
 
-# =====================================================
-# AI STATE + PREDICTION
-# =====================================================
+# ===============================
+# BUILD CURRENT STATE
+# ===============================
 state = build_state(history, lstm)
 
+# ===============================
+# AI PREDICTION ENGINE
+# ===============================
 if state is not None:
     action = agent.act(state)
     cashout = agent.actions[action]
 
-    st.subheader("🧠 AI Signal")
-    st.metric("Suggested Cashout", f"{cashout}x")
+    st.subheader("🧠 AI Prediction")
 
-    # =================================================
-    # ONLINE RL TRAINING
-    # =================================================
+    colA, colB = st.columns(2)
+
+    with colA:
+        st.metric(
+            "Suggested Cashout",
+            f"{cashout}x"
+        )
+
+    with colB:
+        st.metric(
+            "Exploration Rate",
+            f"{round(agent.epsilon, 3)}"
+        )
+
+    # ===============================
+    # REINFORCEMENT LEARNING UPDATE
+    # ===============================
     if len(history) > 10:
-        next_state = build_state(history[:-1], lstm)
+        next_state = build_state(history, lstm)
 
         if next_state is not None:
-            reward = (cashout - 1) if history[-1] >= cashout else -1
+            latest_result = history[-1]
 
-            agent.remember(state, action, reward, next_state, False)
+            reward = (
+                (cashout - 1)
+                if latest_result >= cashout
+                else -1
+            )
+
+            agent.remember(
+                state,
+                action,
+                reward,
+                next_state,
+                False
+            )
+
             agent.train()
 
-
-# =====================================================
-# VISUALIZATION
-# =====================================================
+# ===============================
+# CHART DISPLAY
+# ===============================
 st.subheader("📊 Crash History")
-st.line_chart(history)
 
+if len(history) > 0:
+    st.line_chart(history)
+else:
+    st.info("No rounds added yet")
 
-# =====================================================
+# ===============================
 # DEBUG PANEL
-# =====================================================
-st.sidebar.subheader("📊 System Status")
-st.sidebar.write("Rounds:", len(history))
-st.sidebar.write("Exploration (epsilon):", round(agent.epsilon, 3))
+# ===============================
+st.sidebar.subheader("📊 System Stats")
+st.sidebar.write(f"Rounds Stored: {len(history)}")
+st.sidebar.write(f"Agent Epsilon: {round(agent.epsilon, 3)}")
+
+# ===============================
+# RESET BUTTON
+# ===============================
+if st.sidebar.button("🗑 Reset History"):
+    st.session_state.history = []
+    st.success("History cleared successfully")

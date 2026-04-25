@@ -23,10 +23,10 @@ class Agent:
     def act(self, state):
         if random.random() < self.epsilon:
             return random.randint(0, len(self.actions)-1)
-
-        state = torch.FloatTensor(state)
-        return torch.argmax(self.model(state)).item()
-
+            
+state = torch.FloatTensor(state).unsqueeze(0)  # ADD BATCH DIM
+q_vals = self.model(state)
+return torch.argmax(q_vals).item()
     def remember(self, s, a, r, ns, done):
         self.memory.append((s, a, r, ns, done))
 

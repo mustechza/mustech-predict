@@ -5,15 +5,11 @@ from collections import deque
 from models.dqn import DQN
 import config
 
-
 class Agent:
     def __init__(self):
         self.model = DQN()
         self.target = DQN()
-        self.optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=config.LR
-        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config.LR)
 
         self.memory = deque(maxlen=5000)
 
@@ -25,15 +21,11 @@ class Agent:
         self.actions = config.CASHOUT_ACTIONS
 
     def act(self, state):
-        # Random exploration
         if random.random() < self.epsilon:
-            return random.randint(0, len(self.actions) - 1)
+            return random.randint(0, len(self.actions)-1)
 
-        # Model prediction
-        state = torch.FloatTensor(state).unsqueeze(0)  # Add batch dimension
-        q_vals = self.model(state)
-
-        return torch.argmax(q_vals).item()
+        state = torch.FloatTensor(state)
+        return torch.argmax(self.model(state)).item()
 
     def remember(self, s, a, r, ns, done):
         self.memory.append((s, a, r, ns, done))
@@ -42,29 +34,18 @@ class Agent:
         if len(self.memory) < config.BATCH_SIZE:
             return
 
-        batch = random.sample(
-            self.memory,
-            config.BATCH_SIZE
-        )
+        batch = random.sample(self.memory, config.BATCH_SIZE)
 
         for s, a, r, ns, done in batch:
-            s = torch.FloatTensor(s).unsqueeze(0)
-            ns = torch.FloatTensor(ns).unsqueeze(0)
+            s = torch.FloatTensor(s)
+            ns = torch.FloatTensor(ns)
 
-            if done:
-                target = r
-            else:
-                target = r + (
-                    self.gamma *
-                    torch.max(self.target(ns)).item()
-                )
+            target = r + (self.gamma * torch.max(self.target(ns)).item() if not done else 0)
 
             pred = self.model(s)
+            pred[a] = target
 
-            target_f = pred.clone().detach()
-            target_f[0][a] = target
-
-            loss = (pred - target_f).pow(2).mean()
+            loss = (self.model(s) - pred).pow(2).mean()
 
             self.optimizer.zero_grad()
             loss.backward()

@@ -1,5 +1,8 @@
-import streamlit as st
 
+import streamlit as st
+import os
+st.write(os.listdir())
+st.write(os.listdir("models"))
 from data.loader import load_json
 from models.lstm import LSTMModel
 from models.agent import Agent

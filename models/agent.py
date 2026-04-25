@@ -37,9 +37,8 @@ return torch.argmax(q_vals).item()
         batch = random.sample(self.memory, config.BATCH_SIZE)
 
         for s, a, r, ns, done in batch:
-            s = torch.FloatTensor(s)
-            ns = torch.FloatTensor(ns)
-
+          s = torch.FloatTensor(s).unsqueeze(0)
+ns = torch.FloatTensor(ns).unsqueeze(0)
             target = r + (self.gamma * torch.max(self.target(ns)).item() if not done else 0)
 
             pred = self.model(s)

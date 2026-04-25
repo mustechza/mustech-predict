@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(__file__))
 
 from models.agent import Agent
-from models.lstm import LSTMModelfrom training.pretrain
+from models.lstm import LSTMModel from training.pretrain
 import pretrain
 from training.utils import build_state
 

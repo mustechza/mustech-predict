@@ -10,7 +10,6 @@ class Agent:
     def __init__(self):
         self.model = DQN()
         self.target = DQN()
-
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=config.LR
@@ -26,12 +25,12 @@ class Agent:
         self.actions = config.CASHOUT_ACTIONS
 
     def act(self, state):
-        # Exploration
+        # Random exploration
         if random.random() < self.epsilon:
             return random.randint(0, len(self.actions) - 1)
 
         # Model prediction
-        state = torch.FloatTensor(state).unsqueeze(0)
+        state = torch.FloatTensor(state).unsqueeze(0)  # Add batch dimension
         q_vals = self.model(state)
 
         return torch.argmax(q_vals).item()

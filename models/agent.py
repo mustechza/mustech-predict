@@ -5,11 +5,16 @@ from collections import deque
 from models.dqn import DQN
 import config
 
+
 class Agent:
     def __init__(self):
         self.model = DQN()
         self.target = DQN()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config.LR)
+
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=config.LR
+        )
 
         self.memory = deque(maxlen=5000)
 
@@ -21,12 +26,16 @@ class Agent:
         self.actions = config.CASHOUT_ACTIONS
 
     def act(self, state):
+        # Exploration
         if random.random() < self.epsilon:
-            return random.randint(0, len(self.actions)-1)
-            
-state = torch.FloatTensor(state).unsqueeze(0)  # ADD BATCH DIM
-q_vals = self.model(state)
-return torch.argmax(q_vals).item()
+            return random.randint(0, len(self.actions) - 1)
+
+        # Model prediction
+        state = torch.FloatTensor(state).unsqueeze(0)
+        q_vals = self.model(state)
+
+        return torch.argmax(q_vals).item()
+
     def remember(self, s, a, r, ns, done):
         self.memory.append((s, a, r, ns, done))
 
@@ -34,17 +43,29 @@ return torch.argmax(q_vals).item()
         if len(self.memory) < config.BATCH_SIZE:
             return
 
-        batch = random.sample(self.memory, config.BATCH_SIZE)
+        batch = random.sample(
+            self.memory,
+            config.BATCH_SIZE
+        )
 
         for s, a, r, ns, done in batch:
-          s = torch.FloatTensor(s).unsqueeze(0)
-ns = torch.FloatTensor(ns).unsqueeze(0)
-            target = r + (self.gamma * torch.max(self.target(ns)).item() if not done else 0)
+            s = torch.FloatTensor(s).unsqueeze(0)
+            ns = torch.FloatTensor(ns).unsqueeze(0)
+
+            if done:
+                target = r
+            else:
+                target = r + (
+                    self.gamma *
+                    torch.max(self.target(ns)).item()
+                )
 
             pred = self.model(s)
-            pred[a] = target
 
-            loss = (self.model(s) - pred).pow(2).mean()
+            target_f = pred.clone().detach()
+            target_f[0][a] = target
+
+            loss = (pred - target_f).pow(2).mean()
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -52,4 +73,3 @@ ns = torch.FloatTensor(ns).unsqueeze(0)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
-          

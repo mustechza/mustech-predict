@@ -1,12 +1,12 @@
 from training.utils import train_lstm, build_state
+import torch
 
 def pretrain(history, lstm, agent):
     train_lstm(lstm, history)
 
     for i in range(15, len(history)-1):
-        state = build_state(history[:i], lstm)
-        next_state = build_state(history[:i+1], lstm)
-
+        state = torch.FloatTensor(state).unsqueeze(0)
+next_state = torch.FloatTensor(next_state).unsqueeze(0)
         if state is None or next_state is None:
             continue
 

@@ -12,6 +12,7 @@ class DQN(nn.Module):
             nn.Linear(output_dim, output_dim)
         )
 
-    def forward(self, x):
-        return self.net(x)
-      
+   def forward(self, x):
+    if len(x.shape) == 1:
+        x = x.unsqueeze(0)
+    return self.net(x)
